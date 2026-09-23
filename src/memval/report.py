@@ -22,7 +22,7 @@ CONTROL_LABELS = {
 
 def load_records(path: Path) -> list[dict]:
     records = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -55,24 +55,21 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
     15% is headed invalid per the uncertainty policy (R6). Judge output is
     advisory -- it never feeds back into the mechanical table above.
     """
+    from .judge import CONFAB_SUSPECT_P, FLAG_INVALID_RATE, cell_key
+
     judged = [
         r for r in judge_records if "judge_error" not in r and "answers" in r
     ]
     errors = len(judge_records) - len(judged)
-    adjudicated = {
-        (r["task_id"], r["condition"], r["variant"])
-        for r in judge_records
-        if r.get("adjudicated")
-    }
-    flagged = [
-        r
-        for r in judged
-        if r.get("flags")
-        and (r["task_id"], r["condition"], r["variant"]) not in adjudicated
-    ]
-    clean = [r for r in judged if r not in flagged]
+    adjudicated = {cell_key(r) for r in judge_records if r.get("adjudicated")}
+    flagged, clean = [], []
+    for r in judged:
+        if r.get("flags") and cell_key(r) not in adjudicated:
+            flagged.append(r)
+        else:
+            clean.append(r)
     flag_rate = len(flagged) / len(judged) if judged else 0.0
-    invalid = flag_rate > 0.15
+    invalid = flag_rate > FLAG_INVALID_RATE
 
     heading = "## Judge analysis (Jev)"
     if invalid:
@@ -83,52 +80,39 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
         {r["condition"] for r in clean} - {"none"}, key=CONDITIONS.index
     )
     if conditions:
-        lines += [
-            "### Memory-use probability (live vs control)",
-            "",
-            "| condition | live | control |",
-            "|---|---|---|",
-        ]
-        for c in conditions:
-            live = _mean(
-                [
-                    r["answers"]["memory_used"]["probability"]
-                    for r in clean
-                    if r["condition"] == c and r["variant"] == "live"
-                ]
-            )
-            ctrl = _mean(
-                [
-                    r["answers"]["memory_used"]["probability"]
-                    for r in clean
-                    if r["condition"] == c and r["variant"] == "control"
-                ]
-            )
-            lines.append(f"| {c} | {_fmt(live)} | {_fmt(ctrl)} |")
-        lines += [
-            "",
-            "### Task-success score, 0-4 (live vs control)",
-            "",
-            "| condition | live | control |",
-            "|---|---|---|",
-        ]
-        for c in conditions:
-            live = _mean(
-                [
-                    r["answers"]["task_success"]["score"]
-                    for r in clean
-                    if r["condition"] == c and r["variant"] == "live"
-                ]
-            )
-            ctrl = _mean(
-                [
-                    r["answers"]["task_success"]["score"]
-                    for r in clean
-                    if r["condition"] == c and r["variant"] == "control"
-                ]
-            )
-            lines.append(f"| {c} | {_fmt(live)} | {_fmt(ctrl)} |")
-        lines.append("")
+        for title, getter in (
+            (
+                "Memory-use probability (live vs control)",
+                lambda r: r["answers"]["memory_used"]["probability"],
+            ),
+            (
+                "Task-success score, 0-4 (live vs control)",
+                lambda r: r["answers"]["task_success"]["score"],
+            ),
+        ):
+            lines += [
+                f"### {title}",
+                "",
+                "| condition | live | control |",
+                "|---|---|---|",
+            ]
+            for c in conditions:
+                live = _mean(
+                    [
+                        getter(r)
+                        for r in clean
+                        if r["condition"] == c and r["variant"] == "live"
+                    ]
+                )
+                ctrl = _mean(
+                    [
+                        getter(r)
+                        for r in clean
+                        if r["condition"] == c and r["variant"] == "control"
+                    ]
+                )
+                lines.append(f"| {c} | {_fmt(live)} | {_fmt(ctrl)} |")
+            lines.append("")
 
     counts: dict[str, int] = {}
     for r in clean:
@@ -143,7 +127,7 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
     suspects = [
         r
         for r in clean
-        if r["answers"]["confabulated"]["probability"] > 0.65
+        if r["answers"]["confabulated"]["probability"] > CONFAB_SUSPECT_P
     ]
     if suspects:
         lines += ["### Confabulation suspects", ""]

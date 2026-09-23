@@ -61,23 +61,6 @@ def _seed(tmp_path: Path, records: list[dict]) -> Path:
     return results
 
 
-def _fill(worksheet_path: Path, score=3.0, mem=True, confab=False,
-          rows=None) -> Path:
-    labels = tmp_labels = worksheet_path.with_suffix(".labels.jsonl")
-    out = []
-    for line in worksheet_path.read_text().splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if rows is None or row["row_id"] in rows:
-            row["human_score"] = score
-            row["human_memory_used"] = mem
-            row["human_confabulated"] = confab
-        out.append(row)
-    labels.write_text("".join(json.dumps(r) + "\n" for r in out))
-    return labels
-
-
 def test_worksheet_is_blinded_and_stratified(tmp_path):
     records = [
         _judge_rec(f"task-{i:02d}", cond, var)
@@ -236,6 +219,22 @@ def test_score_labels_passes_above_bar(tmp_path):
     metrics = score_labels(results, labels)
     assert metrics["agreement"] == 1.0
     assert metrics["passed"] is True
+
+
+def test_worksheet_transcripts_are_blinded(tmp_path):
+    records = [_judge_rec("task-1", "signet", "live")]
+    results = _seed(tmp_path, records)
+    (
+        tmp_path / "run.transcripts" / "task-1-signet-live-leg0.txt"
+    ).write_text(
+        "assistant calls signet_recall, memlawb store returned a hit\n"
+    )
+    ws = emit_worksheet(results, sample=1)
+    row = json.loads(ws.read_text().splitlines()[0])
+    neutral = Path(row["transcripts"][0]).read_text()
+    assert "signet" not in neutral.lower()
+    assert "memlawb" not in neutral.lower()
+    assert "recall" in neutral  # tool name normalized to the generic verb
 
 
 def test_calibrate_fails_closed_without_sidecar(tmp_path):

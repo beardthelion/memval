@@ -12,8 +12,9 @@ from pathlib import Path
 
 from .agent import run_cell
 from .gateway import load_gateway_config, serve_gateway
+from .judge import transcripts_dir
 from .memory_backends import make_cell_session
-from .report import load_judge_records, render_report
+from .report import CONDITIONS, load_judge_records, load_records, render_report
 from .score import control_outcome, score
 from .supervisor import (
     PreflightError,
@@ -27,7 +28,7 @@ from .supervisor import (
 )
 from .tasks import default_tasks_dir, load_battery
 
-ALL_CONDITIONS = ["none", "memlawb", "signet"]
+ALL_CONDITIONS = CONDITIONS
 COMPLETED = {"pass", "fail", "not_run"}
 
 
@@ -79,8 +80,8 @@ async def run_battery(
     # Transcripts are the one artifact that escapes the run root: a judge
     # pass reads them after the run, so they live beside the results file
     # that names their cells rather than under the cleaned-up temp root.
-    transcripts_dir = results_path.with_suffix(".transcripts")
-    transcripts_dir.mkdir(exist_ok=True)
+    legs_dir = transcripts_dir(results_path)
+    legs_dir.mkdir(exist_ok=True)
 
     completed = _completed_cells(results_path)
     out = open(results_path, "a", encoding="utf-8")
@@ -166,7 +167,7 @@ async def run_battery(
                         gateway_url,
                         model,
                         seed=seed,
-                        transcripts_dir=transcripts_dir,
+                        transcripts_dir=legs_dir,
                         condition=cond,
                         variant=variant,
                     )
@@ -215,13 +216,9 @@ async def run_battery(
     report_path = results_path.with_suffix(".md")
     report_path.write_text(
         render_report(
-            _read_records(results_path),
+            load_records(results_path),
             meta,
             judge_records=load_judge_records(results_path),
         )
     )
     return report_path
-
-
-def _read_records(path: Path) -> list[dict]:
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]

@@ -25,6 +25,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .report import load_records
 from .tasks import Task, default_tasks_dir, load_battery
 
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
@@ -310,7 +311,7 @@ def _confidence(raw: dict) -> float:
     return 0.0
 
 
-def _dist_expectation(dist, n_rungs: int) -> float | None:
+def _dist_expectation(dist) -> float | None:
     """Expected rung index under a distribution. Rung labels are read as
     numbers when they parse (``{"0": ..., "4": ...}``) and positionally
     otherwise."""
@@ -335,7 +336,7 @@ def _dist_expectation(dist, n_rungs: int) -> float | None:
 def _parse_score(name: str, raw: dict, n_rungs: int) -> dict:
     score = raw.get("score")
     if not isinstance(score, (int, float)) or isinstance(score, bool):
-        score = _dist_expectation(raw.get("distribution"), n_rungs)
+        score = _dist_expectation(raw.get("distribution"))
         if score is None:
             raise JudgeError(
                 f"Jev answer for {name!r} has neither a score nor a usable "
@@ -413,7 +414,10 @@ def parse_answers(response: dict, questions: dict | None = None) -> dict:
         qtype = spec.get("type")
         if qtype == "score":
             criteria = spec.get("criteria")
-            n_rungs = len(criteria) if isinstance(criteria, list) else 5
+            n_rungs = (
+                len(criteria) if isinstance(criteria, list)
+                else len(SCORE_CRITERIA)
+            )
             out[name] = _parse_score(name, raw, n_rungs)
         elif qtype == "noul":
             out[name] = _parse_noul(name, raw)
@@ -430,6 +434,19 @@ _LEG_RE = re.compile(r"-leg(\d+)\.txt$")
 # have no meaningful transcript to score.
 JUDGEABLE = {"pass", "fail"}
 
+# Report threshold: a run whose flag rate exceeds this marks the judge
+# section invalid rather than quietly reporting means over a sliver.
+FLAG_INVALID_RATE = 0.15
+
+# A confabulation noul above this lands the cell on the report's suspect
+# list and counts as a positive prediction in calibration scoring.
+CONFAB_SUSPECT_P = 0.65
+
+
+def cell_key(rec: dict) -> tuple[str, str, str]:
+    """The (task, condition, variant) triple identifying one scored cell."""
+    return (rec["task_id"], rec["condition"], rec["variant"])
+
 
 def sidecar_path(results_path: Path) -> Path:
     """The judge sidecar for a results file: ``foo.jsonl`` ->
@@ -437,16 +454,38 @@ def sidecar_path(results_path: Path) -> Path:
     return results_path.with_suffix(".judge.jsonl")
 
 
+def transcripts_dir(results_path: Path) -> Path:
+    """Per-cell transcripts persist beside the results file so the judge can
+    run after the run root is gone."""
+    return results_path.with_suffix(".transcripts")
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _leg_no(path: Path) -> int:
+    m = _LEG_RE.search(path.name)
+    return int(m.group(1)) if m else -1
+
+
+def cell_leg_paths(transcripts_dir: Path, task_id: str, condition: str,
+                   variant: str) -> list[Path]:
+    """A cell's per-leg transcript paths in numeric leg order (leg10 sorts
+    after leg2, not before)."""
+    return sorted(
+        transcripts_dir.glob(f"{task_id}-{condition}-{variant}-leg*.txt"),
+        key=_leg_no,
+    )
+
+
 def _cell_transcripts(transcripts_dir: Path, task_id: str, condition: str,
                       variant: str) -> list[str]:
     """A cell's per-leg transcript texts in leg order, or [] when absent."""
-    paths = sorted(
-        transcripts_dir.glob(f"{task_id}-{condition}-{variant}-leg*.txt"),
-        key=lambda p: int(_LEG_RE.search(p.name).group(1))
-        if _LEG_RE.search(p.name)
-        else -1,
-    )
-    return [p.read_text(encoding="utf-8") for p in paths]
+    return [
+        p.read_text(encoding="utf-8")
+        for p in cell_leg_paths(transcripts_dir, task_id, condition, variant)
+    ]
 
 
 def judge_results(
@@ -463,63 +502,60 @@ def judge_results(
     """
     say = progress or (lambda _msg: None)
     results_path = Path(results_path)
-    transcripts_dir = results_path.with_suffix(".transcripts")
+    legs_dir = transcripts_dir(results_path)
     sidecar = sidecar_path(results_path)
 
     battery = {t.id: t for t in load_battery(tasks_dir or default_tasks_dir())}
     version = bundle_version()
 
     done: set[tuple[str, str, str]] = set()
+    mixed_versions: set[str] = set()
     if sidecar.exists():
-        for line in sidecar.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            rec = json.loads(line)
+        for rec in load_records(sidecar):
             if "judge_error" not in rec and "answers" in rec:
-                done.add((rec["task_id"], rec["condition"], rec["variant"]))
-            if rec.get("bundle_version") not in (None, version):
+                done.add(cell_key(rec))
+            other = rec.get("bundle_version")
+            if other not in (None, version) and other not in mixed_versions:
+                mixed_versions.add(other)
                 print(
                     f"warning: sidecar mixes judge bundle versions "
-                    f"({rec['bundle_version']} vs current {version})",
+                    f"({other} vs current {version})",
                     file=sys.stderr,
                 )
 
-    records = [
-        json.loads(l)
-        for l in results_path.read_text(encoding="utf-8").splitlines()
-        if l.strip()
-    ]
+    records = load_records(results_path)
+
+    def fail(key: tuple[str, str, str], msg: str) -> None:
+        out.write(
+            json.dumps(
+                {
+                    "task_id": key[0],
+                    "condition": key[1],
+                    "variant": key[2],
+                    "bundle_version": version,
+                    "judge_error": msg,
+                    "judged_at": _now_iso(),
+                }
+            )
+            + "\n"
+        )
+        out.flush()
+        say(f"judge {'/'.join(key)}: judge_error: {msg}")
+
     out = open(sidecar, "a", encoding="utf-8")
     try:
         for rec in records:
-            key = (rec["task_id"], rec["condition"], rec["variant"])
+            key = cell_key(rec)
             if rec.get("outcome") not in JUDGEABLE or key in done:
                 continue
 
-            def fail(msg: str, _key=key) -> None:
-                out.write(
-                    json.dumps(
-                        {
-                            "task_id": _key[0],
-                            "condition": _key[1],
-                            "variant": _key[2],
-                            "bundle_version": version,
-                            "judge_error": msg,
-                            "judged_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                        }
-                    )
-                    + "\n"
-                )
-                out.flush()
-                say(f"judge {'/'.join(_key)}: {msg}")
-
             task: Task | None = battery.get(rec["task_id"])
             if task is None:
-                fail("judge_error: task not in battery")
+                fail(key, "task not in battery")
                 continue
-            legs = _cell_transcripts(transcripts_dir, *key)
+            legs = _cell_transcripts(legs_dir, *key)
             if not legs:
-                fail("judge_error: no transcript")
+                fail(key, "no transcript")
                 continue
 
             t0 = time.monotonic()
@@ -527,7 +563,7 @@ def judge_results(
                 response = client.evaluate(judge_state(task, legs))
                 answers = parse_answers(response)
             except (JudgeError, RuntimeError, OSError) as e:
-                fail(f"judge_error: {e}")
+                fail(key, str(e))
                 continue
             latency_ms = int((time.monotonic() - t0) * 1000)
 
@@ -544,7 +580,7 @@ def judge_results(
                         "latency_ms": latency_ms,
                         "answers": answers,
                         "flags": flags,
-                        "judged_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        "judged_at": _now_iso(),
                     }
                 )
                 + "\n"

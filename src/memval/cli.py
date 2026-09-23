@@ -9,7 +9,8 @@ from pathlib import Path
 import anyio
 
 from .isolation import check_isolation
-from .report import load_judge_records, render_report
+from .judge import transcripts_dir
+from .report import load_judge_records, load_records, render_report
 from .run import ALL_CONDITIONS, run_battery
 from .supervisor import PreflightError
 
@@ -73,13 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "report":
-        records = [
-            json.loads(l)
-            for l in args.results.read_text().splitlines()
-            if l.strip()
-        ]
         print(
-            render_report(records, judge_records=load_judge_records(args.results))
+            render_report(
+                load_records(args.results),
+                judge_records=load_judge_records(args.results),
+            )
         )
         return 0
     if args.cmd == "judge":
@@ -144,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"missing config or file: {e}", file=sys.stderr)
             return 2
         print(f"report: {report_path}")
-        transcripts = report_path.with_suffix(".transcripts")
+        transcripts = transcripts_dir(report_path)
         if transcripts.is_dir():
             print(
                 f"transcripts kept at {transcripts}; "

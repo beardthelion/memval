@@ -7,9 +7,11 @@ No real API calls happen here.
 import json
 import re
 import threading
+from pathlib import Path
 
 import pytest
 
+from memval.cli import main
 from memval.judge import (
     QUESTIONS,
     RUBRIC,
@@ -17,11 +19,12 @@ from memval.judge import (
     JudgeError,
     blind_transcript,
     bundle_version,
+    judge_results,
     judge_state,
     parse_answers,
 )
 from memval.tasks import validate_task
-from tests.fixtures import fake_jev
+from tests.fixtures import fake_jev, fake_upstream
 
 TASK = validate_task(
     {
@@ -398,12 +401,6 @@ def test_parse_answers_rejects_malformed_response():
 
 
 # --- U3: judge_results orchestration ---------------------------------------
-
-from pathlib import Path
-
-from memval.cli import main
-from memval.judge import judge_results
-from tests.fixtures import fake_upstream
 
 
 def _seed_cell(tmp_path: Path, task_id: str, condition: str, variant: str,

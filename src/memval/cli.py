@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -57,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "report":
         records = [
-            __import__("json").loads(l)
+            json.loads(l)
             for l in args.results.read_text().splitlines()
             if l.strip()
         ]

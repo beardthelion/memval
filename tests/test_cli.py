@@ -142,6 +142,68 @@ def test_resume_skips_completed_and_reruns_error(gw_config, tmp_path):
     assert by_task["recall-02"][-1] in ("pass", "fail")  # re-executed
 
 
+def test_resumed_control_uses_completed_live(gw_config, tmp_path, monkeypatch):
+    """A control cell re-executed on resume must classify against the live
+    outcome recorded in the earlier partial run, not 'missing'."""
+    import memval.run as run_mod
+    from tests.test_agent import FakeSession, FakeStore
+
+    results = tmp_path / "run.jsonl"
+    results.write_text(
+        json.dumps(
+            {
+                "task_id": "recall-01",
+                "condition": "memlawb",
+                "variant": "live",
+                "outcome": "pass",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "task_id": "recall-01",
+                "condition": "memlawb",
+                "variant": "control",
+                "outcome": "error",
+            }
+        )
+        + "\n"
+    )
+
+    class DummyStore:
+        def stop(self):
+            pass
+
+    store = FakeStore()
+    monkeypatch.setattr(run_mod, "spawn_store", lambda *a, **k: DummyStore())
+    monkeypatch.setattr(
+        run_mod,
+        "make_cell_session",
+        lambda cond, t, control, log_dir, **kw: FakeSession(t, control, log_dir, store),
+    )
+
+    rc = main(
+        [
+            "run",
+            "--config",
+            str(gw_config),
+            "--model",
+            "fake",
+            "--conditions",
+            "memlawb",
+            "--tasks",
+            "recall-01",
+            "--results",
+            str(results),
+        ]
+    )
+    assert rc == 0
+    records = [json.loads(l) for l in results.read_text().splitlines()]
+    ctrl = [r for r in records if r["variant"] == "control"]
+    assert ctrl[-1]["outcome"] == "fail"  # blinded reads: no recall possible
+    assert ctrl[-1]["control_outcome"] == "collapsed"
+
+
 def test_bad_config_exits_nonzero(tmp_path):
     rc = main(
         [

@@ -70,6 +70,9 @@ async def run_battery(
     if task_filter:
         wanted = set(task_filter)
         tasks = [t for t in tasks if t.id in wanted]
+        missing = wanted - {t.id for t in tasks}
+        if missing:
+            raise PreflightError(f"--tasks matched no battery entries: {sorted(missing)}")
 
     run_root = RunRoot()
     log_dir = run_root.log_dir()
@@ -127,15 +130,12 @@ async def run_battery(
         for task in tasks:
             for cond in conditions:
                 variants = ["live"] + (["control"] if cond != "none" else [])
-                live_outcome: str | None = None
+                # Seed from completed cells so a resumed control cell still
+                # classifies against the earlier live outcome.
+                live_outcome = completed.get((task.id, cond, "live"))
                 for variant in variants:
                     key = (task.id, cond, variant)
                     if key in completed:
-                        live_outcome = live_outcome or (
-                            completed.get((task.id, cond, "live"))
-                            if variant == "control"
-                            else None
-                        )
                         continue
                     if cond in unavailable:
                         emit(

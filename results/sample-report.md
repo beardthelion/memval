@@ -1,16 +1,16 @@
 # memval report
 
-model: `fake` | generated: 2026-09-23 14:30:45 -0500 | fixture upstream
+model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 15:29:53 -0500
 
 | task | none | memlawb | signet |
 |---|---|---|---|
 | `follow-01` | fail | fail | fail |
-| `follow-02` | fail | pass | pass |
+| `follow-02` | fail | fail | pass |
 | `follow-03` | fail | pass | pass |
-| `follow-04` | fail | fail | fail |
-| `follow-05` | fail | fail | fail |
-| `follow-06` | fail | pass | pass |
-| `follow-07` | fail | fail | fail |
+| `follow-04` | fail | fail | pass |
+| `follow-05` | fail | pass | fail |
+| `follow-06` | fail | fail | pass |
+| `follow-07` | fail | pass | pass |
 | `follow-08` | fail | fail | pass |
 | `follow-09` | fail | fail | fail |
 | `leak-01` | pass | pass | pass |
@@ -20,21 +20,21 @@ model: `fake` | generated: 2026-09-23 14:30:45 -0500 | fixture upstream
 | `leak-05` | pass | pass | pass |
 | `leak-06` | pass | pass | pass |
 | `recall-01` | fail | pass | pass |
-| `recall-02` | fail | fail | fail |
+| `recall-02` | fail | pass | fail |
 | `recall-03` | fail | pass | fail |
-| `recall-04` | fail | fail | fail |
+| `recall-04` | fail | pass | fail |
 | `recall-05` | fail | pass | fail |
 | `recall-06` | fail | pass | fail |
 | `recall-07` | fail | pass | fail |
 | `recall-08` | fail | pass | fail |
-| `recall-09` | fail | fail | fail |
+| `recall-09` | pass | pass | pass |
 | `recall-10` | fail | pass | fail |
 
 ## Totals
 
-- **none**: 6/25 passed
-- **memlawb**: 16/25 passed
-- **signet**: 11/25 passed
+- **none**: 7/25 passed
+- **memlawb**: 19/25 passed
+- **signet**: 14/25 passed
 
 ## Controls (retrieval disabled, writes verified)
 
@@ -42,18 +42,18 @@ model: `fake` | generated: 2026-09-23 14:30:45 -0500 | fixture upstream
 |---|---|---|---|
 | `follow-01` | memlawb | inconclusive | - |
 | `follow-01` | signet | inconclusive | - |
-| `follow-02` | memlawb | collapsed | - |
+| `follow-02` | memlawb | inconclusive | - |
 | `follow-02` | signet | collapsed | - |
 | `follow-03` | memlawb | collapsed | - |
 | `follow-03` | signet | collapsed | - |
 | `follow-04` | memlawb | inconclusive | - |
-| `follow-04` | signet | inconclusive | - |
-| `follow-05` | memlawb | inconclusive | - |
+| `follow-04` | signet | collapsed | - |
+| `follow-05` | memlawb | collapsed | - |
 | `follow-05` | signet | inconclusive | - |
-| `follow-06` | memlawb | collapsed | - |
+| `follow-06` | memlawb | inconclusive | - |
 | `follow-06` | signet | collapsed | - |
-| `follow-07` | memlawb | inconclusive | - |
-| `follow-07` | signet | inconclusive | - |
+| `follow-07` | memlawb | collapsed | - |
+| `follow-07` | signet | collapsed | - |
 | `follow-08` | memlawb | inconclusive | - |
 | `follow-08` | signet | collapsed | - |
 | `follow-09` | memlawb | inconclusive | - |
@@ -72,11 +72,11 @@ model: `fake` | generated: 2026-09-23 14:30:45 -0500 | fixture upstream
 | `leak-06` | signet | collapsed | ok |
 | `recall-01` | memlawb | collapsed | - |
 | `recall-01` | signet | collapsed | - |
-| `recall-02` | memlawb | inconclusive | - |
+| `recall-02` | memlawb | collapsed | - |
 | `recall-02` | signet | inconclusive | - |
 | `recall-03` | memlawb | collapsed | - |
 | `recall-03` | signet | inconclusive | - |
-| `recall-04` | memlawb | inconclusive | - |
+| `recall-04` | memlawb | collapsed | - |
 | `recall-04` | signet | inconclusive | - |
 | `recall-05` | memlawb | collapsed | - |
 | `recall-05` | signet | inconclusive | - |
@@ -86,15 +86,15 @@ model: `fake` | generated: 2026-09-23 14:30:45 -0500 | fixture upstream
 | `recall-07` | signet | inconclusive | - |
 | `recall-08` | memlawb | collapsed | - |
 | `recall-08` | signet | inconclusive | - |
-| `recall-09` | memlawb | inconclusive | - |
-| `recall-09` | signet | inconclusive | - |
+| `recall-09` | memlawb | INVALID (no drop) | - |
+| `recall-09` | signet | INVALID (no drop) | - |
 | `recall-10` | memlawb | collapsed | - |
 | `recall-10` | signet | inconclusive | - |
 
 ## Tool-call witnesses
 
-- memlawb: 45 tool calls across live cells
-- signet: 23 tool calls across live cells
+- memlawb: 207 tool calls across live cells
+- signet: 205 tool calls across live cells
 
 ## Disclosures
 

@@ -102,6 +102,8 @@ def make_handler(config: dict):
             url = route["base"].rstrip("/") + "/chat/completions"
             req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST")
             req.add_header("Content-Type", "application/json")
+            # urllib's default UA is bot-filtered by some providers' edge (cf 1010).
+            req.add_header("User-Agent", "curl/8.5.0")
             key_env = route.get("key_env")
             if key_env:
                 key = os.environ.get(key_env, "")

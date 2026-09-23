@@ -1,0 +1,22 @@
+{
+  "id": "recall-08",
+  "type": "recall",
+  "sessions": [
+    [
+      "Picked up a new book from the library.",
+      "Remember that I am currently reading The Left Hand of Darkness."
+    ],
+    [
+      "Which book am I reading at the moment?"
+    ]
+  ],
+  "planted_facts": [
+    "I am currently reading The Left Hand of Darkness",
+    "Left Hand of Darkness"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["left hand of darkness"]
+  },
+  "control": true
+}

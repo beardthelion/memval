@@ -1,0 +1,25 @@
+{
+  "id": "follow-02",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "Help me plan the grocery run for this weekend.",
+      "We decided the list is eggs, spinach, and a bag of rice.",
+      "That's the whole list, nothing else to add."
+    ],
+    [
+      "What items ended up on my grocery list?"
+    ]
+  ],
+  "planted_facts": [
+    "eggs, spinach, and a bag of rice",
+    "eggs",
+    "spinach",
+    "rice"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["eggs", "spinach", "rice"]
+  },
+  "control": true
+}

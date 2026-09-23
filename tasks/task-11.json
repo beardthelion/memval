@@ -1,0 +1,24 @@
+{
+  "id": "follow-01",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "I need to book a dentist appointment for a cleaning.",
+      "The office offered Thursday at 2pm or Friday at 11am.",
+      "I decided on the Thursday slot, please mark it confirmed."
+    ],
+    [
+      "What appointment did I book, and when is it?"
+    ]
+  ],
+  "planted_facts": [
+    "dentist appointment",
+    "Thursday at 2pm",
+    "I decided on the Thursday slot"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["dentist", "thursday", "2pm"]
+  },
+  "control": true
+}

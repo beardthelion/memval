@@ -1,0 +1,22 @@
+{
+  "id": "recall-04",
+  "type": "recall",
+  "sessions": [
+    [
+      "Quick note from the planning meeting.",
+      "We decided to call the new internal dashboard Project Falcon."
+    ],
+    [
+      "What codename did we pick for the new internal dashboard? Reply with just the codename."
+    ]
+  ],
+  "planted_facts": [
+    "We decided to call the new internal dashboard Project Falcon",
+    "Falcon"
+  ],
+  "expected": {
+    "mode": "exact",
+    "value": "Falcon"
+  },
+  "control": true
+}

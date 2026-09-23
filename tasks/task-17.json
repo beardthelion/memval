@@ -1,0 +1,25 @@
+{
+  "id": "follow-07",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "I am planning the trip to visit my cousin in Denver.",
+      "We decided to fly out on June 14th and come back June 21st.",
+      "The flights are booked now."
+    ],
+    [
+      "What are the travel dates for my Denver trip?"
+    ]
+  ],
+  "planted_facts": [
+    "fly out on June 14th",
+    "come back June 21st",
+    "June 14",
+    "June 21"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["june 14", "june 21"]
+  },
+  "control": true
+}

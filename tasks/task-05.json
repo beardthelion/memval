@@ -1,0 +1,23 @@
+{
+  "id": "recall-05",
+  "type": "recall",
+  "sessions": [
+    [
+      "Doing some calendar cleanup for the team.",
+      "Remember that I moved the design review to Wednesdays at 3pm."
+    ],
+    [
+      "When does the design review happen now?"
+    ]
+  ],
+  "planted_facts": [
+    "I moved the design review to Wednesdays at 3pm",
+    "Wednesdays",
+    "3pm"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["wednesday", "3pm"]
+  },
+  "control": true
+}

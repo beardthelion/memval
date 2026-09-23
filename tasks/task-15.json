@@ -1,0 +1,24 @@
+{
+  "id": "follow-05",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "The kitchen sink started leaking again.",
+      "Remember that I booked the plumber for Monday morning.",
+      "He said he will arrive between 8 and 10am."
+    ],
+    [
+      "When is the plumber coming to fix the sink?"
+    ]
+  ],
+  "planted_facts": [
+    "I booked the plumber for Monday morning",
+    "Monday",
+    "between 8 and 10am"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["monday", "8"]
+  },
+  "control": true
+}

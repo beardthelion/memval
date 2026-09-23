@@ -1,0 +1,24 @@
+{
+  "id": "follow-08",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "I am ordering lunch for the whole team on Friday.",
+      "I decided to order the veggie wrap with a sparkling water.",
+      "Also add a side of chips to my order."
+    ],
+    [
+      "What did I order for myself at the team lunch?"
+    ]
+  ],
+  "planted_facts": [
+    "veggie wrap",
+    "sparkling water",
+    "side of chips"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["veggie wrap"]
+  },
+  "control": true
+}

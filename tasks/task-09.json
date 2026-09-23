@@ -1,0 +1,22 @@
+{
+  "id": "recall-09",
+  "type": "recall",
+  "sessions": [
+    [
+      "I'm prepping salsa for the potluck tonight.",
+      "Remember that I don't eat cilantro, it tastes like soap to me."
+    ],
+    [
+      "Which herb should I leave out of the salsa?"
+    ]
+  ],
+  "planted_facts": [
+    "I don't eat cilantro",
+    "cilantro"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["cilantro"]
+  },
+  "control": true
+}

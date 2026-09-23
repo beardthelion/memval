@@ -1,0 +1,23 @@
+{
+  "id": "follow-06",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "Book club meets next week and we still had not picked anything.",
+      "We decided on The Martian for this month.",
+      "I need to finish it before Thursday's meeting."
+    ],
+    [
+      "Which book did the club choose for this month?"
+    ]
+  ],
+  "planted_facts": [
+    "We decided on The Martian",
+    "Martian"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["martian"]
+  },
+  "control": true
+}

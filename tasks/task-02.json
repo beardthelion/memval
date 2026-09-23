@@ -1,0 +1,21 @@
+{
+  "id": "recall-02",
+  "type": "recall",
+  "sessions": [
+    [
+      "My favorite color is teal. I just repainted the bike shed in it."
+    ],
+    [
+      "What is my favorite color? Reply with a single word."
+    ]
+  ],
+  "planted_facts": [
+    "My favorite color is teal",
+    "teal"
+  ],
+  "expected": {
+    "mode": "exact",
+    "value": "teal"
+  },
+  "control": true
+}

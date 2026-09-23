@@ -1,0 +1,22 @@
+{
+  "id": "recall-10",
+  "type": "recall",
+  "sessions": [
+    [
+      "I need to plan something special for next month.",
+      "Remember that my wedding anniversary is October 12th."
+    ],
+    [
+      "What is the date of my wedding anniversary?"
+    ]
+  ],
+  "planted_facts": [
+    "my wedding anniversary is October 12th",
+    "October 12"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["october", "12"]
+  },
+  "control": true
+}

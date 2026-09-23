@@ -1,0 +1,22 @@
+{
+  "id": "recall-01",
+  "type": "recall",
+  "sessions": [
+    [
+      "I'm making sandwiches for the picnic tomorrow.",
+      "Remember that I prefer pepperjack cheese on sandwiches."
+    ],
+    [
+      "What cheese should go on the sandwiches for the picnic?"
+    ]
+  ],
+  "planted_facts": [
+    "I prefer pepperjack cheese",
+    "pepperjack"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["pepperjack"]
+  },
+  "control": true
+}

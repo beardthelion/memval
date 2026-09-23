@@ -1,0 +1,23 @@
+{
+  "id": "follow-03",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "The daily standup keeps colliding with my commute.",
+      "We decided to move standup to 9:30am starting next week.",
+      "I told the team, and 9:30 works for everyone."
+    ],
+    [
+      "What time does standup start now?"
+    ]
+  ],
+  "planted_facts": [
+    "move standup to 9:30am",
+    "9:30"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["9:30"]
+  },
+  "control": true
+}

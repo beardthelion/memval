@@ -1,0 +1,23 @@
+{
+  "id": "follow-04",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "My sister's birthday is coming up and I still need a gift.",
+      "I decided to get her a gardening kit since she just moved somewhere with a yard.",
+      "Order placed, it arrives Friday."
+    ],
+    [
+      "What gift did I buy for my sister's birthday?"
+    ]
+  ],
+  "planted_facts": [
+    "I decided to get her a gardening kit",
+    "gardening kit"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["gardening"]
+  },
+  "control": true
+}

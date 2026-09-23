@@ -1,0 +1,22 @@
+{
+  "id": "recall-03",
+  "type": "recall",
+  "sessions": [
+    [
+      "I stopped by the coffee cart this morning.",
+      "Remember that my usual coffee order is a large oat milk latte."
+    ],
+    [
+      "What do I usually get at the coffee cart?"
+    ]
+  ],
+  "planted_facts": [
+    "my usual coffee order is a large oat milk latte",
+    "oat milk latte"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["oat milk latte"]
+  },
+  "control": true
+}

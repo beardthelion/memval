@@ -1,0 +1,22 @@
+{
+  "id": "recall-07",
+  "type": "recall",
+  "sessions": [
+    [
+      "I got back from my run an hour ago.",
+      "Remember that my morning run is the riverside loop, about four miles."
+    ],
+    [
+      "Which route do I run in the mornings?"
+    ]
+  ],
+  "planted_facts": [
+    "my morning run is the riverside loop",
+    "riverside loop"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["riverside"]
+  },
+  "control": true
+}

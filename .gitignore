@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+results/*
+!results/sample-report.md
+docs/plans/

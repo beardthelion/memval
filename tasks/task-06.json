@@ -1,0 +1,22 @@
+{
+  "id": "recall-06",
+  "type": "recall",
+  "sessions": [
+    [
+      "Big news from the weekend.",
+      "Remember that I adopted a cat and named her Miso."
+    ],
+    [
+      "What did I name my new cat?"
+    ]
+  ],
+  "planted_facts": [
+    "I adopted a cat and named her Miso",
+    "Miso"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["miso"]
+  },
+  "control": true
+}

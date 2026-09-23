@@ -1,0 +1,24 @@
+{
+  "id": "follow-09",
+  "type": "follow-through",
+  "sessions": [
+    [
+      "The move is in two weeks and I am not ready.",
+      "We decided to hire movers for the big furniture and do the boxes ourselves.",
+      "The movers are confirmed for Saturday at 9am."
+    ],
+    [
+      "What is the plan for moving day, and when do the movers get here?"
+    ]
+  ],
+  "planted_facts": [
+    "hire movers for the big furniture",
+    "Saturday at 9am",
+    "9am"
+  ],
+  "expected": {
+    "mode": "contains_all",
+    "keywords": ["saturday", "9am"]
+  },
+  "control": true
+}

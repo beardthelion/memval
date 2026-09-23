@@ -4,19 +4,19 @@
   "sessions": [
     [
       "I'm prepping salsa for the potluck tonight.",
-      "Remember that I don't eat cilantro, it tastes like soap to me."
+      "Remember that I saved the salsa recipe under the tag 'sundial' in my notes."
     ],
     [
-      "Which herb should I leave out of the salsa?"
+      "What tag did I save my salsa recipe under?"
     ]
   ],
   "planted_facts": [
-    "I don't eat cilantro",
-    "cilantro"
+    "saved the salsa recipe under the tag 'sundial'",
+    "sundial"
   ],
   "expected": {
     "mode": "contains_all",
-    "keywords": ["cilantro"]
+    "keywords": ["sundial"]
   },
   "control": true
 }

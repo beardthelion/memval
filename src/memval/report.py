@@ -30,6 +30,144 @@ def load_records(path: Path) -> list[dict]:
     return records
 
 
+def load_judge_records(results_path: Path) -> list[dict] | None:
+    """The sidecar for a results file, or None when no judge pass ran."""
+    from .judge import sidecar_path
+
+    sidecar = sidecar_path(Path(results_path))
+    if not sidecar.exists():
+        return None
+    return load_records(sidecar)
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _fmt(v: float | None) -> str:
+    return f"{v:.2f}" if v is not None else "-"
+
+
+def _judge_section(judge_records: list[dict]) -> list[str]:
+    """Render the judge analysis block from sidecar records (R8).
+
+    Flagged cells are excluded from the means; a run whose flag rate exceeds
+    15% is headed invalid per the uncertainty policy (R6). Judge output is
+    advisory -- it never feeds back into the mechanical table above.
+    """
+    judged = [
+        r for r in judge_records if "judge_error" not in r and "answers" in r
+    ]
+    errors = len(judge_records) - len(judged)
+    adjudicated = {
+        (r["task_id"], r["condition"], r["variant"])
+        for r in judge_records
+        if r.get("adjudicated")
+    }
+    flagged = [
+        r
+        for r in judged
+        if r.get("flags")
+        and (r["task_id"], r["condition"], r["variant"]) not in adjudicated
+    ]
+    clean = [r for r in judged if r not in flagged]
+    flag_rate = len(flagged) / len(judged) if judged else 0.0
+    invalid = flag_rate > 0.15
+
+    heading = "## Judge analysis (Jev)"
+    if invalid:
+        heading += f" -- INVALID: {flag_rate:.0%} of cells flagged (>15%)"
+    lines = ["", heading, ""]
+
+    conditions = sorted(
+        {r["condition"] for r in clean} - {"none"}, key=CONDITIONS.index
+    )
+    if conditions:
+        lines += [
+            "### Memory-use probability (live vs control)",
+            "",
+            "| condition | live | control |",
+            "|---|---|---|",
+        ]
+        for c in conditions:
+            live = _mean(
+                [
+                    r["answers"]["memory_used"]["probability"]
+                    for r in clean
+                    if r["condition"] == c and r["variant"] == "live"
+                ]
+            )
+            ctrl = _mean(
+                [
+                    r["answers"]["memory_used"]["probability"]
+                    for r in clean
+                    if r["condition"] == c and r["variant"] == "control"
+                ]
+            )
+            lines.append(f"| {c} | {_fmt(live)} | {_fmt(ctrl)} |")
+        lines += [
+            "",
+            "### Task-success score, 0-4 (live vs control)",
+            "",
+            "| condition | live | control |",
+            "|---|---|---|",
+        ]
+        for c in conditions:
+            live = _mean(
+                [
+                    r["answers"]["task_success"]["score"]
+                    for r in clean
+                    if r["condition"] == c and r["variant"] == "live"
+                ]
+            )
+            ctrl = _mean(
+                [
+                    r["answers"]["task_success"]["score"]
+                    for r in clean
+                    if r["condition"] == c and r["variant"] == "control"
+                ]
+            )
+            lines.append(f"| {c} | {_fmt(live)} | {_fmt(ctrl)} |")
+        lines.append("")
+
+    counts: dict[str, int] = {}
+    for r in clean:
+        cls = r["answers"]["failure_class"]["choice"]
+        counts[cls] = counts.get(cls, 0) + 1
+    if counts:
+        lines += ["### Failure classes", ""]
+        for cls, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {cls}: {n}")
+        lines.append("")
+
+    suspects = [
+        r
+        for r in clean
+        if r["answers"]["confabulated"]["probability"] > 0.65
+    ]
+    if suspects:
+        lines += ["### Confabulation suspects", ""]
+        for r in suspects:
+            p = r["answers"]["confabulated"]["probability"]
+            lines.append(
+                f"- `{r['task_id']}` ({r['condition']}, {r['variant']}): {p:.2f}"
+            )
+        lines.append("")
+
+    in_tok = sum(
+        (r.get("usage") or {}).get("input_tokens", 0) for r in judge_records
+    )
+    out_tok = sum(
+        (r.get("usage") or {}).get("output_tokens", 0) for r in judge_records
+    )
+    lines += [
+        f"- {len(judged)} cells judged, {len(flagged)} flagged "
+        f"({flag_rate:.0%}), {errors} judge errors",
+        f"- judge spend: {in_tok} input / {out_tok} output tokens",
+    ]
+    return lines
+
+
 def _cell_map(records: list[dict]) -> dict[tuple[str, str, str], dict]:
     """Last record wins per (task, condition, variant), so a resumed run's
     re-executed error cell replaces its earlier error record."""
@@ -39,7 +177,11 @@ def _cell_map(records: list[dict]) -> dict[tuple[str, str, str], dict]:
     return cells
 
 
-def render_report(records: list[dict], meta: dict | None = None) -> str:
+def render_report(
+    records: list[dict],
+    meta: dict | None = None,
+    judge_records: list[dict] | None = None,
+) -> str:
     cells = _cell_map(records)
     task_ids = sorted({r["task_id"] for r in records})
     conditions = [c for c in CONDITIONS if any(r["condition"] == c for r in records)]
@@ -127,4 +269,6 @@ def render_report(records: list[dict], meta: dict | None = None) -> str:
         "- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message.",
         "",
     ]
+    if judge_records:
+        lines += _judge_section(judge_records)
     return "\n".join(lines)

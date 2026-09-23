@@ -75,3 +75,96 @@ def test_resume_last_record_wins():
 def test_fixture_marker():
     report = render_report([], {"fixture": True, "model": "fake"})
     assert "fixture upstream" in report
+
+
+# --- U4: judge section -----------------------------------------------------
+
+from memval.report import load_judge_records
+
+
+def _judge_rec(task_id, condition, variant, mem_p=0.9, score_v=3.5,
+               confab_p=0.1, cls="no-failure", flags=None):
+    return {
+        "task_id": task_id,
+        "condition": condition,
+        "variant": variant,
+        "model": "jev-latest",
+        "bundle_version": "abc123",
+        "usage": {"input_tokens": 1000, "output_tokens": 10},
+        "answers": {
+            "task_success": {"score": score_v, "confidence": 0.9},
+            "memory_used": {"probability": mem_p},
+            "confabulated": {"probability": confab_p},
+            "failure_class": {"choice": cls, "confidence": 0.9},
+        },
+        "flags": flags or [],
+    }
+
+
+def test_judge_section_renders_separation(tmp_path):
+    records = [
+        {"task_id": "t1", "condition": "memlawb", "variant": "live", "outcome": "pass"},
+        {"task_id": "t1", "condition": "memlawb", "variant": "control", "outcome": "fail"},
+    ]
+    judge = [
+        _judge_rec("t1", "memlawb", "live", mem_p=0.9),
+        _judge_rec("t1", "memlawb", "control", mem_p=0.1),
+    ]
+    out = render_report(records, judge_records=judge)
+    assert "## Judge analysis (Jev)" in out
+    assert "Memory-use probability" in out
+    assert "| memlawb | 0.90 | 0.10 |" in out
+    assert "no-failure: 2" in out
+    assert "judge spend: 2000 input" in out
+
+
+def test_report_without_sidecar_is_unchanged(tmp_path):
+    records = [
+        {"task_id": "t1", "condition": "none", "variant": "live", "outcome": "pass"},
+    ]
+    with_judge = render_report(records)
+    without = render_report(records, judge_records=None)
+    assert with_judge == without
+    assert "Judge" not in without
+
+
+def test_load_judge_records_absent_and_present(tmp_path):
+    results = tmp_path / "run.jsonl"
+    results.write_text("{}\n")
+    assert load_judge_records(results) is None
+    sidecar = tmp_path / "run.judge.jsonl"
+    sidecar.write_text(json.dumps(_judge_rec("t1", "memlawb", "live")) + "\n")
+    assert len(load_judge_records(results)) == 1
+
+
+def test_flagged_cells_excluded_from_means(tmp_path):
+    judge = [
+        _judge_rec("t1", "memlawb", "live", mem_p=0.9),
+        _judge_rec("t2", "memlawb", "live", mem_p=0.1, flags=["memory_used"]),
+        _judge_rec("t1", "memlawb", "control", mem_p=0.2),
+    ]
+    records = [
+        {"task_id": "t1", "condition": "memlawb", "variant": "live", "outcome": "pass"},
+        {"task_id": "t2", "condition": "memlawb", "variant": "live", "outcome": "pass"},
+        {"task_id": "t1", "condition": "memlawb", "variant": "control", "outcome": "fail"},
+    ]
+    out = render_report(records, judge_records=judge)
+    # The flagged t2 cell is excluded: live mean is 0.90, not 0.50.
+    assert "| memlawb | 0.90 | 0.20 |" in out
+    assert "1 flagged" in out
+
+
+def test_judge_section_invalid_over_flag_threshold(tmp_path):
+    judge = [
+        _judge_rec(f"t{i}", "memlawb", "live", flags=["task_success"])
+        for i in range(3)
+    ] + [_judge_rec(f"t{i}", "memlawb", "live") for i in range(3, 8)]
+    out = render_report([], judge_records=judge)
+    assert "INVALID" in out
+
+
+def test_judge_section_skips_absent_conditions(tmp_path):
+    judge = [_judge_rec("t1", "signet", "live")]
+    out = render_report([], judge_records=judge)
+    assert "| signet |" in out
+    assert "| memlawb |" not in out

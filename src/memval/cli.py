@@ -9,7 +9,7 @@ from pathlib import Path
 import anyio
 
 from .isolation import check_isolation
-from .report import render_report
+from .report import load_judge_records, render_report
 from .run import ALL_CONDITIONS, run_battery
 from .supervisor import PreflightError
 
@@ -55,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     jud.add_argument("--endpoint", default=None,
                      help="override the System One endpoint")
 
+    cal = sub.add_parser(
+        "calibrate",
+        help="emit a blinded labeling worksheet, or score completed labels",
+    )
+    cal.add_argument("results", type=Path)
+    cal.add_argument("--sample", type=int, default=30)
+    cal.add_argument("--labels", type=Path, default=None)
+
     chk = sub.add_parser("check-isolation", help="enable/disable artifact check per backend")
     chk.add_argument("backend", choices=["memlawb", "signet"])
     chk.add_argument("--memlawb-checkout", type=Path, default=DEFAULT_MEMLAWB)
@@ -70,7 +78,9 @@ def main(argv: list[str] | None = None) -> int:
             for l in args.results.read_text().splitlines()
             if l.strip()
         ]
-        print(render_report(records))
+        print(
+            render_report(records, judge_records=load_judge_records(args.results))
+        )
         return 0
     if args.cmd == "judge":
         from .judge import JEV_ENDPOINT, JevClient, judge_results
@@ -83,6 +93,24 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = judge_results(args.results, tasks_dir=args.tasks_dir, client=client)
         print(f"judge sidecar: {sidecar}")
         return 0
+    if args.cmd == "calibrate":
+        from .calibrate import emit_worksheet, score_labels
+
+        try:
+            if args.labels:
+                metrics = score_labels(args.results, args.labels)
+                print(json.dumps(metrics, indent=2))
+                print(
+                    f"agreement {metrics['agreement']:.2f} vs bar "
+                    f"{metrics['bar']} -> {'PASS' if metrics['passed'] else 'FAIL'}"
+                )
+                return 0 if metrics["passed"] else 1
+            ws = emit_worksheet(args.results, sample=args.sample)
+            print(f"worksheet: {ws}")
+            return 0
+        except FileNotFoundError as e:
+            print(str(e), file=sys.stderr)
+            return 2
     if args.cmd == "check-isolation":
         checkout = args.memlawb_checkout if args.backend == "memlawb" else args.signet_checkout
         result = anyio.run(check_isolation, args.backend, checkout)

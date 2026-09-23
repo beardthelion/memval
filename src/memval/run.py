@@ -13,7 +13,7 @@ from pathlib import Path
 from .agent import run_cell
 from .gateway import load_gateway_config, serve_gateway
 from .memory_backends import make_cell_session
-from .report import render_report
+from .report import load_judge_records, render_report
 from .score import control_outcome, score
 from .supervisor import (
     PreflightError,
@@ -213,7 +213,13 @@ async def run_battery(
         "fixture": fixture,
     }
     report_path = results_path.with_suffix(".md")
-    report_path.write_text(render_report(_read_records(results_path), meta))
+    report_path.write_text(
+        render_report(
+            _read_records(results_path),
+            meta,
+            judge_records=load_judge_records(results_path),
+        )
+    )
     return report_path
 
 

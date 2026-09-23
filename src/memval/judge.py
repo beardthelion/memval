@@ -475,7 +475,7 @@ def judge_results(
             if not line.strip():
                 continue
             rec = json.loads(line)
-            if "judge_error" not in rec:
+            if "judge_error" not in rec and "answers" in rec:
                 done.add((rec["task_id"], rec["condition"], rec["variant"]))
             if rec.get("bundle_version") not in (None, version):
                 print(

@@ -18,6 +18,7 @@ running anything.
   memlawb and signet repositories
 - A reachable OpenAI-compatible upstream, or the bundled fake upstream for
   fixture runs
+- Optional, for `memval judge`: `TYPESAFE_API_KEY` in the environment
 
 ## Quickstart
 
@@ -69,6 +70,8 @@ memval run [--config <file>] [--model <name>] [--conditions none,memlawb,signet]
            [--tasks recall-01,leak-03] [--results <file.jsonl>] [--seed N]
            [--fixture]
 memval report <results.jsonl>
+memval judge <results.jsonl> [--tasks-dir PATH] [--endpoint URL]
+memval calibrate <results.jsonl> [--sample 30 | --labels <file>]
 memval check-isolation <memlawb|signet>
 ```
 
@@ -77,7 +80,13 @@ memval check-isolation <memlawb|signet>
   results file. Exit is nonzero only when the harness could not run: bad
   config, missing upstream, no tasks matched. A condition whose backend fails
   preflight is recorded as `not_run`, never as a zero pass rate.
-- `report` re-renders any complete or partial results file.
+- `report` re-renders any complete or partial results file. When a judge
+  sidecar exists next to the results file the report gains a Judge analysis
+  section; without one it renders exactly as before.
+- `judge` runs the optional Jev analysis pass over a finished results file
+  (below). It never mutates results and can be re-run to fill gaps.
+- `calibrate` emits a blinded human-labeling worksheet for a stratified
+  sample of judged cells, or scores a filled worksheet against the sidecar.
 - `check-isolation` stands a backend up under a fresh temporary root, writes
   and recalls a fact, tears it down, then proves a fresh root recalls nothing
   and no artifacts (store files, custody, passphrase files, transcripts)
@@ -138,7 +147,8 @@ signet via `SIGNET_HOME` custody.
 
 ## Scoring
 
-Scoring is mechanical; there is no LLM judge.
+Scoring is mechanical and is the scorer of record; the optional Jev layer
+below is analysis, not the outcome.
 
 - `exact`: normalized final answer equals `expected.value`.
 - `contains_all`: every `expected.keywords` entry appears in the normalized
@@ -150,6 +160,56 @@ Scoring is mechanical; there is no LLM judge.
 Normalization is case-folding plus whitespace collapse. Cell outcomes are
 `pass`, `fail`, `error` (harness or upstream fault, re-run on resume), and
 `not_run` (condition could not start).
+
+## Judge layer (optional)
+
+`memval judge` adds a supplementary analysis pass on top of the mechanical
+outcome. It sends each scored cell's blinded transcripts to the Jev System
+One endpoint in one batched call and records four typed answers per cell:
+
+- `task_success`: a 0-4 rubric score with confidence,
+- `memory_used`: a probability the agent actually used stored memory,
+- `confabulated`: a probability the agent cited memory that was never
+  planted (the task's `planted_facts` are the ground truth, so the
+  question means the same thing under all three conditions),
+- `failure_class`: one of `no-failure`, `retrieval-miss`,
+  `wrong-memory`, `confabulation`, `tool-error`, `refused`.
+
+These are calibrated probabilities from a judge model, not ground truth.
+They never change the mechanical outcome and never feed the control check.
+
+**Artifacts.** Transcripts persist to `<results-stem>.transcripts/` and
+judge output to `<results-stem>.judge.jsonl`; both sit beside the results
+file. Re-running `judge` skips cells that already judged cleanly and
+retries `judge_error` cells.
+
+**Blinding.** The judge never sees condition labels: transcripts are
+stripped of backend names and tool names are normalized to generic memory
+verbs. Blinding is not total, by construction. `none` cells have no tool
+calls and memlawb's agent-visible writes have no signet counterpart, so
+the judge can still infer the condition family from call shapes. The
+calibration pass below measures the residual per-condition bias rather
+than pretending it is zero.
+
+**Flags.** Answers the judge is unsure about are flagged: score and
+failure-class answers under 0.6 confidence, noul answers with probability
+inside [0.35, 0.65]. Flagged cells stay out of the report's judge means
+until a human adjudicates them through calibration; if more than 15% of
+cells are flagged the judge section marks itself invalid.
+
+**Calibration.** `memval calibrate <results> --sample 30` writes a blinded
+worksheet (opaque row ids, neutral transcript names, condition join key
+kept harness-side) plus every flagged cell. Fill in `human_score`,
+`human_memory_used`, and `human_confabulated`, then run
+`memval calibrate <results> --labels <file>` to get agreement-within-one
+rung, per-condition bias, confidence reliability, and confabulation
+precision/recall against a 0.8 agreement bar. Labeled flagged cells get
+an adjudication record in the sidecar, clearing the flag. Re-run
+calibration whenever the battery or rubric changes; there is no standing
+per-run audit.
+
+**Cost.** One batched call is roughly 700 input tokens and under half a
+second; a full 125-cell pass costs fractions of a cent and about a minute.
 
 ## The control
 
@@ -205,9 +265,12 @@ relay time, and propagates upstream status codes verbatim.
 `results/` is git-ignored except one committed sample report. Each JSONL
 record carries the cell key, outcome, tool-call count, blinded-read count,
 sentinel and witness results, the final answer (truncated), model, and seed.
-The Markdown report renders the three-way live table, totals, the control
-table with witness marks, tool-call witness counts (a memory condition with
-zero tool calls did not exercise the backend), and the disclosures block.
+Per-cell transcripts persist next to the results file under
+`<results-stem>.transcripts/` so `memval judge` can score them after the
+run root is gone. The Markdown report renders the three-way live table,
+totals, the control table with witness marks, tool-call witness counts (a
+memory condition with zero tool calls did not exercise the backend), the
+disclosures block, and the judge section when a sidecar exists.
 
 Reproducibility is "comparable, not bitwise identical": temperature 0 and
 seed passthrough are sent, but upstream serving is not deterministic even

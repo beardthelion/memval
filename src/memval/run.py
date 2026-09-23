@@ -74,13 +74,17 @@ async def run_battery(
         if missing:
             raise PreflightError(f"--tasks matched no battery entries: {sorted(missing)}")
 
-    run_root = RunRoot()
-    log_dir = run_root.log_dir()
-    transcripts_dir = run_root.path / "transcripts"
-    transcripts_dir.mkdir()
-
     results_path = results_path or Path("results") / f"{int(time.time())}.jsonl"
     results_path.parent.mkdir(parents=True, exist_ok=True)
+
+    run_root = RunRoot()
+    log_dir = run_root.log_dir()
+    # Transcripts are the one artifact that escapes the run root: a judge
+    # pass reads them after the run, so they live beside the results file
+    # that names their cells rather than under the cleaned-up temp root.
+    transcripts_dir = results_path.with_suffix(".transcripts")
+    transcripts_dir.mkdir(exist_ok=True)
+
     completed = _completed_cells(results_path)
     out = open(results_path, "a", encoding="utf-8")
 
@@ -166,6 +170,8 @@ async def run_battery(
                         model,
                         seed=seed,
                         transcripts_dir=transcripts_dir,
+                        condition=cond,
+                        variant=variant,
                     )
                     evidence = res.evidence
                     record: dict = {

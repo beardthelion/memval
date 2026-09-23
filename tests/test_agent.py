@@ -121,7 +121,10 @@ def upstream_url():
 
 def _run(task, session, gw, tmp_path):
     async def go():
-        return await run_cell(task, session, gw, "fake", seed=1, transcripts_dir=tmp_path)
+        return await run_cell(
+            task, session, gw, "fake",
+            seed=1, transcripts_dir=tmp_path, condition="test", variant="live",
+        )
 
     return anyio.run(go)
 

@@ -113,8 +113,15 @@ async def run_cell(
     seed: int | None = None,
     max_tokens: int = 4096,
     transcripts_dir: Path,
+    condition: str,
+    variant: str,
 ) -> CellResult:
-    """Replay one task under one cell session; score nothing here."""
+    """Replay one task under one cell session; score nothing here.
+
+    Transcript filenames carry the cell identity (condition + variant) so
+    live and control cells of the same task cannot overwrite each other and
+    a later judge pass can address a cell's legs directly.
+    """
     tool_calls = 0
     try:
         for leg_index, leg in enumerate(task.sessions):
@@ -149,7 +156,10 @@ async def run_cell(
                         )
                 else:
                     raise UpstreamError(f"task {task.id} leg {leg_index}: turn budget exhausted")
-            transcript = transcripts_dir / f"{task.id}-leg{leg_index}.txt"
+            transcript = (
+                transcripts_dir
+                / f"{task.id}-{condition}-{variant}-leg{leg_index}.txt"
+            )
             _write_transcript(transcript, messages)
             await session.end_leg(transcript)
             # Isolation witness: prove the plant landed in this leg's scope

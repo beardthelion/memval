@@ -176,6 +176,14 @@ def _validate_expected(raw: object, fail) -> Expected:
     )
 
 
+def default_tasks_dir() -> Path:
+    """Battery location: package-relative when running from the checkout,
+    else cwd so an installed package can run against a battery in the
+    working directory."""
+    here = Path(__file__).resolve().parent.parent.parent / "tasks"
+    return here if here.is_dir() else Path.cwd() / "tasks"
+
+
 def load_battery(tasks_dir: str | Path) -> list[Task]:
     """Load and validate every ``*.json`` task file in ``tasks_dir``,
     in filename order."""

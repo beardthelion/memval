@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     rep = sub.add_parser("report", help="render a report from a results JSONL")
     rep.add_argument("results", type=Path)
 
+    jud = sub.add_parser(
+        "judge", help="judge a run's persisted transcripts with the Jev API"
+    )
+    jud.add_argument("results", type=Path)
+    jud.add_argument("--tasks-dir", type=Path, default=None)
+    jud.add_argument("--endpoint", default=None,
+                     help="override the System One endpoint")
+
     chk = sub.add_parser("check-isolation", help="enable/disable artifact check per backend")
     chk.add_argument("backend", choices=["memlawb", "signet"])
     chk.add_argument("--memlawb-checkout", type=Path, default=DEFAULT_MEMLAWB)
@@ -63,6 +71,17 @@ def main(argv: list[str] | None = None) -> int:
             if l.strip()
         ]
         print(render_report(records))
+        return 0
+    if args.cmd == "judge":
+        from .judge import JEV_ENDPOINT, JevClient, judge_results
+
+        try:
+            client = JevClient(endpoint=args.endpoint or JEV_ENDPOINT)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        sidecar = judge_results(args.results, tasks_dir=args.tasks_dir, client=client)
+        print(f"judge sidecar: {sidecar}")
         return 0
     if args.cmd == "check-isolation":
         checkout = args.memlawb_checkout if args.backend == "memlawb" else args.signet_checkout
@@ -97,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"missing config or file: {e}", file=sys.stderr)
             return 2
         print(f"report: {report_path}")
+        transcripts = report_path.with_suffix(".transcripts")
+        if transcripts.is_dir():
+            print(
+                f"transcripts kept at {transcripts}; "
+                f"`memval judge {report_path.with_suffix('.jsonl')}` runs the "
+                "Jev analysis layer"
+            )
         return 0
     return 2
 

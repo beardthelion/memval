@@ -395,3 +395,163 @@ def test_parse_answers_rejects_malformed_response():
                 }
             }
         )
+
+
+# --- U3: judge_results orchestration ---------------------------------------
+
+from pathlib import Path
+
+from memval.cli import main
+from memval.judge import judge_results
+from tests.fixtures import fake_upstream
+
+
+def _seed_cell(tmp_path: Path, task_id: str, condition: str, variant: str,
+               outcome: str = "pass", transcripts: int = 2) -> None:
+    results = tmp_path / "run.jsonl"
+    with open(results, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "condition": condition,
+                    "variant": variant,
+                    "outcome": outcome,
+                }
+            )
+            + "\n"
+        )
+    transcripts_dir = tmp_path / "run.transcripts"
+    transcripts_dir.mkdir(exist_ok=True)
+    for leg in range(transcripts):
+        (transcripts_dir / f"{task_id}-{condition}-{variant}-leg{leg}.txt").write_text(
+            f"User: prompt leg {leg}\nAssistant called recall({{}})\n"
+            "Tool: pepperjack\nAssistant: Pepperjack.\n"
+        )
+
+
+def test_judge_results_covers_judgeable_cells_only(jev_server, tmp_path):
+    _seed_cell(tmp_path, "recall-01", "none", "live", "pass")
+    _seed_cell(tmp_path, "recall-01", "memlawb", "live", "fail")
+    _seed_cell(tmp_path, "recall-02", "none", "live", "error")
+    _seed_cell(tmp_path, "recall-02", "memlawb", "live", "not_run")
+
+    sidecar = judge_results(
+        tmp_path / "run.jsonl", client=_client(jev_server), progress=None
+    )
+    recs = [json.loads(l) for l in sidecar.read_text().splitlines() if l.strip()]
+    keys = {(r["task_id"], r["condition"], r["variant"]) for r in recs}
+    assert keys == {
+        ("recall-01", "none", "live"),
+        ("recall-01", "memlawb", "live"),
+    }
+    for r in recs:
+        assert r["model"] == "jev-latest"
+        assert r["bundle_version"] == bundle_version()
+        assert r["usage"]["input_tokens"] == 1234
+        assert isinstance(r["latency_ms"], int)
+        assert set(r["answers"]) == set(QUESTIONS)
+
+
+def test_judge_results_resume_is_noop(jev_server, tmp_path):
+    _seed_cell(tmp_path, "recall-01", "none", "live")
+    client = _client(jev_server)
+    judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+    n = len(jev_server.jev_state.requests)
+    judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+    assert len(jev_server.jev_state.requests) == n
+
+
+def test_judge_results_missing_transcript_marks_error(jev_server, tmp_path):
+    _seed_cell(tmp_path, "recall-01", "none", "live")
+    _seed_cell(tmp_path, "recall-02", "none", "live", transcripts=0)
+
+    sidecar = judge_results(
+        tmp_path / "run.jsonl", client=_client(jev_server), progress=None
+    )
+    recs = {r["task_id"]: r for r in
+            (json.loads(l) for l in sidecar.read_text().splitlines())}
+    assert "judge_error" in recs["recall-02"]
+    assert "judge_error" not in recs["recall-01"]
+
+
+def test_judge_results_unknown_task_marks_error(jev_server, tmp_path):
+    _seed_cell(tmp_path, "nope-99", "none", "live")
+    sidecar = judge_results(
+        tmp_path / "run.jsonl", client=_client(jev_server), progress=None
+    )
+    (rec,) = [json.loads(l) for l in sidecar.read_text().splitlines() if l.strip()]
+    assert "battery" in rec["judge_error"]
+
+
+def test_judge_results_does_not_mutate_results(jev_server, tmp_path):
+    _seed_cell(tmp_path, "recall-01", "none", "live")
+    before = (tmp_path / "run.jsonl").read_bytes()
+    judge_results(tmp_path / "run.jsonl", client=_client(jev_server), progress=None)
+    assert (tmp_path / "run.jsonl").read_bytes() == before
+
+
+def test_judge_results_warns_on_bundle_version_mismatch(jev_server, tmp_path, capsys):
+    _seed_cell(tmp_path, "recall-01", "none", "live")
+    sidecar = tmp_path / "run.judge.jsonl"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "task_id": "recall-02",
+                "condition": "none",
+                "variant": "live",
+                "bundle_version": "stale0000version",
+                "answers": {},
+            }
+        )
+        + "\n"
+    )
+    judge_results(tmp_path / "run.jsonl", client=_client(jev_server), progress=None)
+    assert "bundle versions" in capsys.readouterr().err
+
+
+def test_judge_cli_end_to_end(jev_server, tmp_path, monkeypatch):
+    """Fixture run -> persisted transcripts -> `memval judge` -> sidecar."""
+    upstream = fake_upstream.serve(0)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    cfg = tmp_path / "memval.config.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "fake": {
+                        "base": f"http://127.0.0.1:{upstream.server_address[1]}",
+                        "key_env": None,
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    endpoint = f"http://127.0.0.1:{jev_server.server_address[1]}/v1/systemone"
+    try:
+        results = tmp_path / "run.jsonl"
+        rc = main(
+            [
+                "run", "--config", str(cfg), "--model", "fake",
+                "--results", str(results), "--fixture",
+                "--conditions", "none", "--tasks", "recall-01",
+            ]
+        )
+        assert rc == 0
+        rc = main(["judge", str(results), "--endpoint", endpoint])
+        assert rc == 0
+        sidecar = tmp_path / "run.judge.jsonl"
+        (rec,) = [json.loads(l) for l in sidecar.read_text().splitlines()]
+        assert rec["task_id"] == "recall-01"
+        assert rec["condition"] == "none"
+        assert rec["answers"]["task_success"]["score"] == 3.6
+    finally:
+        upstream.shutdown()
+
+
+def test_judge_cli_fails_closed_without_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    results = tmp_path / "run.jsonl"
+    results.write_text("")
+    assert main(["judge", str(results)]) == 2

@@ -18,10 +18,14 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Sequence
+from pathlib import Path
+from typing import Callable, Sequence
+
+from .tasks import Task, default_tasks_dir, load_battery
 
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 JEV_MODEL = "jev-latest"
@@ -418,3 +422,139 @@ def parse_answers(response: dict, questions: dict | None = None) -> dict:
         else:
             raise JudgeError(f"unknown question type {qtype!r} for {name!r}")
     return out
+
+
+_LEG_RE = re.compile(r"-leg(\d+)\.txt$")
+
+# Outcomes worth judging: cells that ran to an answer. error/not_run cells
+# have no meaningful transcript to score.
+JUDGEABLE = {"pass", "fail"}
+
+
+def sidecar_path(results_path: Path) -> Path:
+    """The judge sidecar for a results file: ``foo.jsonl`` ->
+    ``foo.judge.jsonl``."""
+    return results_path.with_suffix(".judge.jsonl")
+
+
+def _cell_transcripts(transcripts_dir: Path, task_id: str, condition: str,
+                      variant: str) -> list[str]:
+    """A cell's per-leg transcript texts in leg order, or [] when absent."""
+    paths = sorted(
+        transcripts_dir.glob(f"{task_id}-{condition}-{variant}-leg*.txt"),
+        key=lambda p: int(_LEG_RE.search(p.name).group(1))
+        if _LEG_RE.search(p.name)
+        else -1,
+    )
+    return [p.read_text(encoding="utf-8") for p in paths]
+
+
+def judge_results(
+    results_path: Path,
+    *,
+    client: JevClient,
+    tasks_dir: Path | None = None,
+    progress: Callable[[str], None] | None = print,
+) -> Path:
+    """Judge every pass/fail cell and append results to the sidecar.
+
+    Resumable: cells with a non-error sidecar record are skipped; cells that
+    errored are re-judged. Results records are never mutated (R1).
+    """
+    say = progress or (lambda _msg: None)
+    results_path = Path(results_path)
+    transcripts_dir = results_path.with_suffix(".transcripts")
+    sidecar = sidecar_path(results_path)
+
+    battery = {t.id: t for t in load_battery(tasks_dir or default_tasks_dir())}
+    version = bundle_version()
+
+    done: set[tuple[str, str, str]] = set()
+    if sidecar.exists():
+        for line in sidecar.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if "judge_error" not in rec:
+                done.add((rec["task_id"], rec["condition"], rec["variant"]))
+            if rec.get("bundle_version") not in (None, version):
+                print(
+                    f"warning: sidecar mixes judge bundle versions "
+                    f"({rec['bundle_version']} vs current {version})",
+                    file=sys.stderr,
+                )
+
+    records = [
+        json.loads(l)
+        for l in results_path.read_text(encoding="utf-8").splitlines()
+        if l.strip()
+    ]
+    out = open(sidecar, "a", encoding="utf-8")
+    try:
+        for rec in records:
+            key = (rec["task_id"], rec["condition"], rec["variant"])
+            if rec.get("outcome") not in JUDGEABLE or key in done:
+                continue
+
+            def fail(msg: str, _key=key) -> None:
+                out.write(
+                    json.dumps(
+                        {
+                            "task_id": _key[0],
+                            "condition": _key[1],
+                            "variant": _key[2],
+                            "bundle_version": version,
+                            "judge_error": msg,
+                            "judged_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        }
+                    )
+                    + "\n"
+                )
+                out.flush()
+                say(f"judge {'/'.join(_key)}: {msg}")
+
+            task: Task | None = battery.get(rec["task_id"])
+            if task is None:
+                fail("judge_error: task not in battery")
+                continue
+            legs = _cell_transcripts(transcripts_dir, *key)
+            if not legs:
+                fail("judge_error: no transcript")
+                continue
+
+            t0 = time.monotonic()
+            try:
+                response = client.evaluate(judge_state(task, legs))
+                answers = parse_answers(response)
+            except (JudgeError, RuntimeError, OSError) as e:
+                fail(f"judge_error: {e}")
+                continue
+            latency_ms = int((time.monotonic() - t0) * 1000)
+
+            flags = [name for name, a in answers.items() if a.get("flagged")]
+            out.write(
+                json.dumps(
+                    {
+                        "task_id": rec["task_id"],
+                        "condition": rec["condition"],
+                        "variant": rec["variant"],
+                        "model": response.get("model"),
+                        "bundle_version": version,
+                        "usage": response.get("usage"),
+                        "latency_ms": latency_ms,
+                        "answers": answers,
+                        "flags": flags,
+                        "judged_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    }
+                )
+                + "\n"
+            )
+            out.flush()
+            say(
+                f"judge {'/'.join(key)}: scored "
+                f"{answers['task_success']['score']:.1f} in {latency_ms}ms"
+                + (f" (flagged: {', '.join(flags)})" if flags else "")
+            )
+    finally:
+        out.close()
+    return sidecar

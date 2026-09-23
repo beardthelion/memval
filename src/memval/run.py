@@ -25,7 +25,7 @@ from .supervisor import (
     signet_store_env,
     spawn_store,
 )
-from .tasks import load_battery
+from .tasks import default_tasks_dir, load_battery
 
 ALL_CONDITIONS = ["none", "memlawb", "signet"]
 COMPLETED = {"pass", "fail", "not_run"}
@@ -63,10 +63,7 @@ async def run_battery(
             raise PreflightError("config has multiple models; pass --model")
         model = next(iter(cfg["models"]))
 
-    tasks_dir = Path(__file__).resolve().parent.parent.parent / "tasks"
-    if not tasks_dir.is_dir():
-        tasks_dir = Path.cwd() / "tasks"
-    tasks = load_battery(tasks_dir)
+    tasks = load_battery(default_tasks_dir())
     if task_filter:
         wanted = set(task_filter)
         tasks = [t for t in tasks if t.id in wanted]

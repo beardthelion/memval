@@ -104,26 +104,27 @@ model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 21:52:47 -0500
 - `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message. `contains_all` keywords match at a left token boundary with no trailing digit ('12pm' cannot satisfy '2pm'; '9:30am' still satisfies '9:30').
 
 
-## Judge analysis (Jev) -- INVALID: 34% of judgeable cells flagged (>15%)
+## Judge analysis (Jev)
 
 ### Memory-use probability (live vs control)
 
 | condition | live | control |
 |---|---|---|
-| memlawb | 0.87 | 0.14 |
-| signet | 0.79 | 0.12 |
+| memlawb | 0.63 | 0.12 |
+| signet | 0.67 | 0.09 |
 
 ### Task-success score, 0-4 (live vs control)
 
 | condition | live | control |
 |---|---|---|
-| memlawb | 3.55 | 0.49 |
-| signet | 2.75 | 0.47 |
+| memlawb | 3.28 | 1.15 |
+| signet | 2.58 | 1.06 |
 
 ### Failure classes
 
-- retrieval-miss: 62
-- no-failure: 21
+- retrieval-miss: 74
+- no-failure: 49
+- tool-error: 2
 
-- 125 cells judged, 42 flagged (34%), 0 unresolved judge errors
-- judge spend: 487806 input / 15584 output tokens
+- 125 cells judged, 0 flagged (0%), 0 unresolved judge errors
+- judge spend: 489846 input / 15570 output tokens

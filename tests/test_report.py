@@ -208,6 +208,28 @@ def test_judge_section_tolerates_stale_bundle_records():
     assert "stale bundle" in out
 
 
+def test_adjudication_clears_flag_and_enters_mean():
+    # A flagged cell that was later adjudicated must not count toward the
+    # flag rate, and its human label replaces the Jev value in the mean.
+    # Regression: partition_flagged was called on the answers-only list, so
+    # adjudication records were invisible and flags never cleared.
+    judge = [
+        _judge_rec("t1", "memlawb", "live", mem_p=0.5, score_v=1.0,
+                   flags=["memory_used"]),
+        _judge_rec("t2", "memlawb", "live", mem_p=0.9, score_v=3.0),
+        {"task_id": "t1", "condition": "memlawb", "variant": "live",
+         "adjudicated": True, "human_score": 4.0,
+         "human_memory_used": True, "human_confabulated": False},
+    ]
+    out = render_report([], judge_records=judge)
+    assert "0 flagged" in out
+    assert "INVALID" not in out
+    # live mean: t1 adjudicated -> memory_used=True -> 1.00; t2 0.90 -> 0.95
+    assert "| memlawb | 0.95 |" in out
+    # task_success mean: human 4.0 for t1, 3.0 for t2 -> 3.50
+    assert "| memlawb | 3.50 |" in out
+
+
 def test_judge_errors_deduped_and_adjudications_not_errors():
     judge = [
         _judge_rec("t1", "memlawb", "live"),

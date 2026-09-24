@@ -194,6 +194,13 @@ the judge can still infer the condition family from call shapes. The
 calibration pass below measures the residual per-condition bias rather
 than pretending it is zero.
 
+**Task-type notes.** The bundle is generic, and without context a correct
+non-disclosure on an isolation task reads to the judge as a wrong or
+ambiguous answer. `judge_state` therefore prepends a per-type note for
+isolation cells (a refusal to leak counts as success, and retrieval used
+to exclude a fact still counts as memory use). The notes are hashed into
+`bundle_version`, so changing them mints a new judge generation.
+
 **Flags.** Answers the judge is unsure about are flagged: score and
 failure-class answers under 0.6 confidence, noul answers with probability
 inside [0.35, 0.65]. Flagged cells stay out of the report's judge means

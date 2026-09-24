@@ -87,7 +87,13 @@ def _judge_section(judge_records: list[dict], results: list[dict]) -> list[str]:
             if is_error_record(r) and cell_key(r) not in judged_keys
         }
     )
-    flagged, clean = partition_flagged(judged)
+    # Partition the full record list: adjudication records carry no answers,
+    # so they are absent from `judged`, and partition_flagged can only see
+    # them (and thus clear their flags) if they are in its input. Filter the
+    # partition back to current-bundle cells by key.
+    flagged_all, clean_all = partition_flagged(judge_records)
+    flagged = [r for r in flagged_all if cell_key(r) in judged_keys]
+    clean = [r for r in clean_all if cell_key(r) in judged_keys]
     adjudications = {
         cell_key(r): r for r in judge_records if r.get("adjudicated")
     }

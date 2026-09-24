@@ -81,6 +81,20 @@ def test_contains_all_respects_token_boundaries():
     assert score(t, "moved to 2pm tomorrow", ["moved to 2pm tomorrow"]) == "pass"
     # Punctuation-adjacent matches still count.
     assert score(t, "moved to 2pm, confirmed", ["moved to 2pm, confirmed"]) == "pass"
+    # Inflections and meridiem suffixes are the same fact, not false passes:
+    # 'wednesdays' satisfies 'wednesday', '9:30am' satisfies '9:30'.
+    assert score(_task("contains_all", keywords=["wednesday"]),
+                 "Wednesdays at 3pm", ["Wednesdays at 3pm"]) == "pass"
+    assert score(_task("contains_all", keywords=["9:30"]),
+                 "9:30am, per the note", ["9:30am, per the note"]) == "pass"
+    # A trailing digit still changes the value: '9:300' != '9:30'.
+    assert score(_task("contains_all", keywords=["9:30"]),
+                 "it logs 9:300 ticks", ["it logs 9:300 ticks"]) == "fail"
+    # A leading digit on a bare number is a different value: '18' != '8'.
+    assert score(_task("contains_all", keywords=["8"]),
+                 "moved to 18:00", ["moved to 18:00"]) == "fail"
+    assert score(_task("contains_all", keywords=["8"]),
+                 "moved to 8", ["moved to 8"]) == "pass"
 
 
 def test_control_requires_blinded_read_evidence():

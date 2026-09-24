@@ -154,8 +154,8 @@ below is analysis, not the outcome.
 
 - `exact`: normalized final answer equals `expected.value`.
 - `contains_all`: every `expected.keywords` entry appears in the normalized
-  final answer on token boundaries (a keyword cannot match inside a larger
-  token).
+  final answer at a left token boundary with no trailing digit (so `12pm`
+  cannot satisfy `2pm`, but `9:30am` still satisfies `9:30`).
 - `contains_none`: no `expected.forbidden` token appears in *any* assistant
   message of the closing leg, so a mid-session leak cannot pass on a clean
   final line.

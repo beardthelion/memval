@@ -310,7 +310,7 @@ def render_report(
         "- Tool surfaces are native per condition: memlawb advertises save/recall/search/list/delete; signet advertises read tools only, with capture done harness-side by `signet learn` at each session boundary. Backend guide text and server instructions are filtered to the advertised surface; calls to unadvertised tools return a tool error.",
         "- Write paths differ by design: memlawb saves are agent-discretionary; signet captures are automatic at the boundary. This asymmetry is the design difference being measured.",
         "- Isolation tasks measure default-surface leakage only: the second fictional user's session is never told the first user's scope name, so backend options that address a sibling scope by name are untested.",
-        "- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message. `contains_all` matches keywords on token boundaries.",
+        "- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message. `contains_all` keywords match at a left token boundary with no trailing digit ('12pm' cannot satisfy '2pm'; '9:30am' still satisfies '9:30').",
         "",
     ]
     if judge_records:

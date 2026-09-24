@@ -20,12 +20,15 @@ def normalize(text: str) -> str:
 
 
 def _contains_term(haystack: str, term: str) -> bool:
-    """Token-boundary keyword match on normalized text."""
+    """Keyword match on normalized text: no leading word char, so '12pm'
+    cannot satisfy '2pm' and '18' cannot satisfy '8'. Trailing letters are
+    allowed (inflection like 'wednesdays' or a meridiem like '9:30am' is
+    still the same fact); a trailing digit is not ('9:300' != '9:30')."""
     needle = normalize(term)
     if not needle:
         return False
     return (
-        re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", haystack)
+        re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\d)", haystack)
         is not None
     )
 

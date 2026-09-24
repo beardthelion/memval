@@ -176,6 +176,7 @@ def bundle_version() -> str:
             "rubric": RUBRIC,
             "questions": QUESTIONS,
             "type_notes": TASK_TYPE_NOTES,
+            "model": JEV_MODEL,
         },
         sort_keys=True,
     ).encode()
@@ -584,6 +585,7 @@ def judge_results(
         say(f"judge {'/'.join(key)}: judge_error: {msg}")
 
     out = open(sidecar, "a", encoding="utf-8")
+    attempted = succeeded = 0
     try:
         for rec in records:
             key = cell_key(rec)
@@ -592,10 +594,12 @@ def judge_results(
 
             task: Task | None = battery.get(rec["task_id"])
             if task is None:
+                attempted += 1
                 fail(key, "task not in battery")
                 continue
             legs = _cell_transcripts(legs_dir, *key)
             if not legs:
+                attempted += 1
                 fail(key, "no transcript")
                 continue
 
@@ -604,8 +608,10 @@ def judge_results(
                 response = client.evaluate(judge_state(task, legs))
                 answers = parse_answers(response)
             except (JudgeError, RuntimeError, OSError) as e:
+                attempted += 1
                 fail(key, str(e))
                 continue
+            succeeded += 1
             latency_ms = int((time.monotonic() - t0) * 1000)
 
             flags = [name for name, a in answers.items() if a.get("flagged")]
@@ -634,4 +640,8 @@ def judge_results(
             )
     finally:
         out.close()
+    if attempted and not succeeded:
+        raise JudgeError(
+            f"all {attempted} judgeable cells failed; see {sidecar}"
+        )
     return sidecar

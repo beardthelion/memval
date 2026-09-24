@@ -474,11 +474,35 @@ def test_judge_results_missing_transcript_marks_error(jev_server, tmp_path):
 
 def test_judge_results_unknown_task_marks_error(jev_server, tmp_path):
     _seed_cell(tmp_path, "nope-99", "none", "live")
-    sidecar = judge_results(
-        tmp_path / "run.jsonl", client=_client(jev_server), progress=None
-    )
+    # Every attempted cell failed, so the pass reports failure even though
+    # the error record was written to the sidecar.
+    with pytest.raises(JudgeError):
+        judge_results(
+            tmp_path / "run.jsonl", client=_client(jev_server), progress=None
+        )
+    sidecar = tmp_path / "run.judge.jsonl"
     (rec,) = [json.loads(l) for l in sidecar.read_text().splitlines() if l.strip()]
     assert "battery" in rec["judge_error"]
+
+
+def test_judge_results_raises_when_every_cell_fails(tmp_path):
+    _seed_cell(tmp_path, "recall-01", "none", "live")
+    _seed_cell(tmp_path, "recall-02", "none", "live")
+
+    class _DeadClient:
+        def evaluate(self, _state):
+            raise RuntimeError("upstream down")
+
+    with pytest.raises(JudgeError, match="all 2"):
+        judge_results(
+            tmp_path / "run.jsonl", client=_DeadClient(), progress=None
+        )
+    recs = [
+        json.loads(l)
+        for l in (tmp_path / "run.judge.jsonl").read_text().splitlines()
+    ]
+    assert len(recs) == 2
+    assert all("judge_error" in r for r in recs)
 
 
 def test_judge_results_does_not_mutate_results(jev_server, tmp_path):
@@ -567,7 +591,12 @@ def test_endpoint_rejects_non_loopback_http():
 def test_terminal_errors_not_reappended(jev_server, tmp_path):
     _seed_cell(tmp_path, "nope-99", "none", "live")
     client = _client(jev_server)
-    sidecar = judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+    sidecar = tmp_path / "run.judge.jsonl"
+    # The first pass attempts the cell and fails outright. The second skips
+    # the terminal-error cell entirely, so nothing is attempted and nothing
+    # raises; the check is that no duplicate record was appended.
+    with pytest.raises(JudgeError):
+        judge_results(tmp_path / "run.jsonl", client=client, progress=None)
     judge_results(tmp_path / "run.jsonl", client=client, progress=None)
     recs = [
         json.loads(l) for l in sidecar.read_text().splitlines() if l.strip()
@@ -582,10 +611,15 @@ def test_transient_errors_retry_on_next_run(tmp_path):
     try:
         _seed_cell(tmp_path, "recall-01", "none", "live")
         client = _client(bad)
-        sidecar = judge_results(
-            tmp_path / "run.jsonl", client=client, progress=None
-        )
-        judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+        sidecar = tmp_path / "run.judge.jsonl"
+        with pytest.raises(JudgeError):
+            judge_results(
+                tmp_path / "run.jsonl", client=client, progress=None
+            )
+        with pytest.raises(JudgeError):
+            judge_results(
+                tmp_path / "run.jsonl", client=client, progress=None
+            )
         recs = [
             json.loads(l)
             for l in sidecar.read_text().splitlines()
@@ -611,12 +645,13 @@ def test_out_of_range_answer_records_judge_error(tmp_path):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         _seed_cell(tmp_path, "recall-01", "none", "live")
-        sidecar = judge_results(
-            tmp_path / "run.jsonl", client=_client(srv), progress=None
-        )
+        with pytest.raises(JudgeError):
+            judge_results(
+                tmp_path / "run.jsonl", client=_client(srv), progress=None
+            )
         (rec,) = [
             json.loads(l)
-            for l in sidecar.read_text().splitlines()
+            for l in (tmp_path / "run.judge.jsonl").read_text().splitlines()
             if l.strip()
         ]
         assert "outside" in rec["judge_error"]

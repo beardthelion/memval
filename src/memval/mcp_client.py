@@ -62,12 +62,12 @@ class McpConnection:
         # capture that Client(StdioServerParameters) would take on its own.
         # If anything after __aenter__ raises, __aexit__ must still run or the
         # child stays alive and asyncio blocks in waitpid at loop teardown.
-        self._client = Client(
-            stdio_client(params, errlog=self._errlog),
-            read_timeout_seconds=self._read_timeout,
-            message_handler=self._on_message,
-        )
         try:
+            self._client = Client(
+                stdio_client(params, errlog=self._errlog),
+                read_timeout_seconds=self._read_timeout,
+                message_handler=self._on_message,
+            )
             await self._client.__aenter__()
             self.instructions = self._client.instructions
             tools = await self._client.list_tools()

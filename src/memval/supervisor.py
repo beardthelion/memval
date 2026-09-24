@@ -107,13 +107,17 @@ def spawn_store(
     env = base_env() | env_block
     log_path = log_dir / f"{name}.log"
     log = open(log_path, "ab")
-    proc = subprocess.Popen(
-        argv,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-    )
+    try:
+        proc = subprocess.Popen(
+            argv,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+    finally:
+        # Popen dup'd the fd into the child; the parent's copy would leak.
+        log.close()
     mp = ManagedProcess(name=name, proc=proc, log_path=log_path)
     if health_url and not wait_for_health(health_url, health_timeout):
         tail = log_path.read_bytes()[-2000:].decode(errors="replace")

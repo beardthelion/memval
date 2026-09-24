@@ -86,7 +86,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     if args.cmd == "judge":
-        from .judge import JEV_ENDPOINT, JevClient, judge_results
+        from .judge import (
+            JEV_ENDPOINT,
+            JevClient,
+            JudgeError,
+            judge_results,
+        )
 
         try:
             client = JevClient(endpoint=args.endpoint or JEV_ENDPOINT)
@@ -100,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             print(str(e), file=sys.stderr)
             return 2
+        except JudgeError as e:
+            print(str(e), file=sys.stderr)
+            return 1
         print(f"judge sidecar: {sidecar}")
         return 0
     if args.cmd == "calibrate":

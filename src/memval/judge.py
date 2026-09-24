@@ -34,6 +34,7 @@ from .records import (
     is_error_record,
     is_judged_record,
     load_records,
+    locked,
     now_iso,
     sidecar_path,
     transcripts_dir,
@@ -532,6 +533,12 @@ def judge_results(
     battery = {t.id: t for t in load_battery(tasks_dir or default_tasks_dir())}
     version = bundle_version()
 
+    # Held from the resume scan through the last append so a concurrent
+    # judge or calibrate --labels on this file fails fast instead of
+    # racing the scan and double-appending records.
+    sidecar_lock = locked(sidecar)
+    sidecar_lock.__enter__()
+
     # Latest sidecar record per cell decides resume state: an answers record
     # is done, a terminal judge_error is done (it cannot heal), and a
     # transient error retries. Adjudication records never mark a cell done.
@@ -640,6 +647,7 @@ def judge_results(
             )
     finally:
         out.close()
+        sidecar_lock.__exit__(None, None, None)
     if attempted and not succeeded:
         raise JudgeError(
             f"all {attempted} judgeable cells failed; see {sidecar}"

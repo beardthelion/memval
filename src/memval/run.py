@@ -14,7 +14,13 @@ from pathlib import Path
 from .agent import run_cell
 from .gateway import load_gateway_config, serve_gateway
 from .memory_backends import make_cell_session
-from .records import cell_key, load_judge_records, load_records, transcripts_dir
+from .records import (
+    cell_key,
+    load_judge_records,
+    load_records,
+    locked,
+    transcripts_dir,
+)
 from .report import CONDITIONS, render_report
 from .score import control_outcome, score
 from .supervisor import (
@@ -80,6 +86,13 @@ async def run_battery(
     # that names their cells rather than under the cleaned-up temp root.
     legs_dir = transcripts_dir(results_path)
     legs_dir.mkdir(exist_ok=True)
+
+    # Held from the resume scan through the last append so a concurrent
+    # `run`/`judge`/`calibrate` on this file fails fast instead of
+    # double-appending cells. Entered manually because the battery body
+    # already has its own try/finally for teardown.
+    results_lock = locked(results_path)
+    results_lock.__enter__()
 
     completed = _completed_cells(results_path)
     if completed:
@@ -224,6 +237,7 @@ async def run_battery(
                     emit(record)
     finally:
         out.close()
+        results_lock.__exit__(None, None, None)
         for s in stores:
             s.stop()
         gateway.shutdown()

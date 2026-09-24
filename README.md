@@ -103,6 +103,12 @@ resume (below) rather than firing a full battery blind.
 recorded `pass`, `fail`, or `not_run` are skipped; `error` cells re-execute.
 Kill a run any time and restart it against the same file.
 
+Commands that resume-then-append (`run`, `judge`, `calibrate --labels`)
+hold an advisory lock on a `<file>.lock` sibling for the whole scan/append
+cycle. A second process on the same results file fails fast rather than
+double-appending records. A lock held by a killed process is released by
+the OS; the `.lock` file it leaves behind is harmless and reused.
+
 ## The battery
 
 `tasks/` holds 25 JSON tasks in three families:

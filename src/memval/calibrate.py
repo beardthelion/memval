@@ -34,6 +34,7 @@ from .records import (
     is_judged_record,
     load_judge_records,
     load_records,
+    locked,
     now_iso,
     partition_flagged,
     sidecar_path,
@@ -160,6 +161,13 @@ def score_labels(results_path: Path, labels_path: Path) -> dict:
     join_map = map_doc.get("rows", map_doc)  # tolerate pre-generation maps
     generation = map_doc.get("generation") if "rows" in map_doc else None
 
+    # Locked from the sidecar scan through the adjudication append so two
+    # calibrate --labels runs cannot both see un-adjudicated flags and
+    # double-append records.
+    sidecar = sidecar_path(results_path)
+    sidecar_lock = locked(sidecar)
+    sidecar_lock.__enter__()
+
     records = _judge_records(results_path)
     by_key = {cell_key(r): r for r in records if is_judged_record(r)}
     flagged_keys = {cell_key(r) for r in partition_flagged(records)[0]}
@@ -256,29 +264,31 @@ def score_labels(results_path: Path, labels_path: Path) -> dict:
     # Adjudication write-back: labeled flagged cells get their flag cleared.
     adjudicated = 0
     version = bundle_version()
-    sidecar = sidecar_path(results_path)
-    with open(sidecar, "a", encoding="utf-8") as out:
-        for row, cell, _r in labeled:
-            key = cell_key(cell)
-            if key not in flagged_keys:
-                continue
-            out.write(
-                json.dumps(
-                    {
-                        "task_id": key[0],
-                        "condition": key[1],
-                        "variant": key[2],
-                        "adjudicated": True,
-                        "human_score": row["human_score"],
-                        "human_memory_used": row["human_memory_used"],
-                        "human_confabulated": row["human_confabulated"],
-                        "bundle_version": version,
-                        "judged_at": now_iso(),
-                    }
+    try:
+        with open(sidecar, "a", encoding="utf-8") as out:
+            for row, cell, _r in labeled:
+                key = cell_key(cell)
+                if key not in flagged_keys:
+                    continue
+                out.write(
+                    json.dumps(
+                        {
+                            "task_id": key[0],
+                            "condition": key[1],
+                            "variant": key[2],
+                            "adjudicated": True,
+                            "human_score": row["human_score"],
+                            "human_memory_used": row["human_memory_used"],
+                            "human_confabulated": row["human_confabulated"],
+                            "bundle_version": version,
+                            "judged_at": now_iso(),
+                        }
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-            adjudicated += 1
+                adjudicated += 1
+    finally:
+        sidecar_lock.__exit__(None, None, None)
 
     agreement = agree / n if n else 0.0
     return {

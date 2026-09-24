@@ -11,11 +11,18 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 
 def load_records(path: Path) -> list[dict]:
@@ -137,3 +144,30 @@ def partition_flagged(records: list[dict]) -> tuple[list[dict], list[dict]]:
         else:
             clean.append(r)
     return flagged, clean
+
+
+@contextlib.contextmanager
+def locked(path: Path):
+    """Hold an advisory lock covering a read-resume-set + append cycle.
+
+    The lock lives on a sibling `<path>.lock` file so a second `run`,
+    `judge`, or `calibrate --labels` on the same results file fails fast
+    instead of racing the resume scan and double-appending records.
+    POSIX-only; on platforms without fcntl this is a no-op.
+    """
+    if fcntl is None:
+        yield
+        return
+    lock_path = path.with_name(path.name + ".lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError(
+                f"another memval process holds {lock_path}; "
+                "wait for it to finish or remove the lock file if it died"
+            )
+        yield
+    finally:
+        os.close(fd)

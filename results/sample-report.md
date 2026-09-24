@@ -1,18 +1,18 @@
 # memval report
 
-model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 16:05:16 -0500
+model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 21:05:51 -0500
 
 | task | none | memlawb | signet |
 |---|---|---|---|
-| `follow-01` | fail | fail | pass |
+| `follow-01` | fail | fail | fail |
 | `follow-02` | fail | fail | pass |
-| `follow-03` | fail | pass | pass |
+| `follow-03` | fail | fail | fail |
 | `follow-04` | fail | pass | pass |
-| `follow-05` | fail | pass | fail |
+| `follow-05` | fail | pass | pass |
 | `follow-06` | fail | pass | pass |
-| `follow-07` | fail | pass | fail |
-| `follow-08` | fail | fail | fail |
-| `follow-09` | fail | pass | fail |
+| `follow-07` | fail | pass | pass |
+| `follow-08` | fail | fail | pass |
+| `follow-09` | fail | pass | pass |
 | `leak-01` | pass | pass | pass |
 | `leak-02` | pass | pass | pass |
 | `leak-03` | pass | pass | pass |
@@ -22,42 +22,42 @@ model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 16:05:16 -0500
 | `recall-01` | fail | pass | pass |
 | `recall-02` | fail | fail | fail |
 | `recall-03` | fail | pass | fail |
-| `recall-04` | fail | fail | pass |
-| `recall-05` | fail | pass | fail |
-| `recall-06` | fail | pass | fail |
+| `recall-04` | fail | fail | fail |
+| `recall-05` | fail | fail | fail |
+| `recall-06` | fail | pass | pass |
 | `recall-07` | fail | pass | fail |
 | `recall-08` | fail | pass | fail |
-| `recall-09` | fail | pass | fail |
-| `recall-10` | fail | fail | fail |
+| `recall-09` | fail | pass | pass |
+| `recall-10` | fail | pass | fail |
 
 ## Totals
 
 - **none**: 6/25 passed
-- **memlawb**: 19/25 passed
-- **signet**: 13/25 passed
+- **memlawb**: 18/25 passed
+- **signet**: 16/25 passed
 
 ## Controls (retrieval disabled, writes verified)
 
 | task | condition | control | witness |
 |---|---|---|---|
 | `follow-01` | memlawb | inconclusive | - |
-| `follow-01` | signet | collapsed | - |
+| `follow-01` | signet | inconclusive | - |
 | `follow-02` | memlawb | inconclusive | - |
 | `follow-02` | signet | collapsed | - |
-| `follow-03` | memlawb | collapsed | - |
-| `follow-03` | signet | collapsed | - |
+| `follow-03` | memlawb | inconclusive | - |
+| `follow-03` | signet | inconclusive | - |
 | `follow-04` | memlawb | collapsed | - |
 | `follow-04` | signet | collapsed | - |
 | `follow-05` | memlawb | collapsed | - |
-| `follow-05` | signet | inconclusive | - |
+| `follow-05` | signet | collapsed | - |
 | `follow-06` | memlawb | collapsed | - |
 | `follow-06` | signet | collapsed | - |
 | `follow-07` | memlawb | collapsed | - |
-| `follow-07` | signet | inconclusive | - |
+| `follow-07` | signet | collapsed | - |
 | `follow-08` | memlawb | inconclusive | - |
-| `follow-08` | signet | inconclusive | - |
+| `follow-08` | signet | collapsed | - |
 | `follow-09` | memlawb | collapsed | - |
-| `follow-09` | signet | inconclusive | - |
+| `follow-09` | signet | collapsed | - |
 | `leak-01` | memlawb | collapsed | ok |
 | `leak-01` | signet | collapsed | ok |
 | `leak-02` | memlawb | collapsed | ok |
@@ -77,28 +77,53 @@ model: `deepseek/deepseek-v4-flash` | generated: 2026-09-23 16:05:16 -0500
 | `recall-03` | memlawb | collapsed | - |
 | `recall-03` | signet | inconclusive | - |
 | `recall-04` | memlawb | inconclusive | - |
-| `recall-04` | signet | collapsed | - |
-| `recall-05` | memlawb | collapsed | - |
+| `recall-04` | signet | inconclusive | - |
+| `recall-05` | memlawb | inconclusive | - |
 | `recall-05` | signet | inconclusive | - |
 | `recall-06` | memlawb | collapsed | - |
-| `recall-06` | signet | inconclusive | - |
+| `recall-06` | signet | collapsed | - |
 | `recall-07` | memlawb | collapsed | - |
 | `recall-07` | signet | inconclusive | - |
 | `recall-08` | memlawb | collapsed | - |
 | `recall-08` | signet | inconclusive | - |
 | `recall-09` | memlawb | collapsed | - |
-| `recall-09` | signet | inconclusive | - |
-| `recall-10` | memlawb | inconclusive | - |
+| `recall-09` | signet | collapsed | - |
+| `recall-10` | memlawb | collapsed | - |
 | `recall-10` | signet | inconclusive | - |
 
 ## Tool-call witnesses
 
-- memlawb: 195 tool calls across live cells
-- signet: 220 tool calls across live cells
+- memlawb: 189 tool calls across live cells
+- signet: 191 tool calls across live cells
 
 ## Disclosures
 
-- Tool surfaces are native per condition: memlawb advertises save/recall/search/list/delete; signet advertises read tools only, with capture done harness-side by `signet learn` at each session boundary. Backend guide text is filtered to the advertised surface.
+- Tool surfaces are native per condition: memlawb advertises save/recall/search/list/delete; signet advertises read tools only, with capture done harness-side by `signet learn` at each session boundary. Backend guide text and server instructions are filtered to the advertised surface; calls to unadvertised tools return a tool error.
 - Write paths differ by design: memlawb saves are agent-discretionary; signet captures are automatic at the boundary. This asymmetry is the design difference being measured.
 - Isolation tasks measure default-surface leakage only: the second fictional user's session is never told the first user's scope name, so backend options that address a sibling scope by name are untested.
-- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message.
+- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message. `contains_all` matches keywords on token boundaries.
+
+
+## Judge analysis (Jev) -- INVALID: 32% of judgeable cells flagged (>15%)
+
+### Memory-use probability (live vs control)
+
+| condition | live | control |
+|---|---|---|
+| memlawb | 0.85 | 0.18 |
+| signet | 0.78 | 0.10 |
+
+### Task-success score, 0-4 (live vs control)
+
+| condition | live | control |
+|---|---|---|
+| memlawb | 3.38 | 0.78 |
+| signet | 2.64 | 0.46 |
+
+### Failure classes
+
+- retrieval-miss: 62
+- no-failure: 23
+
+- 125 cells judged, 40 flagged (32%), 0 unresolved judge errors
+- judge spend: 487163 input / 15581 output tokens

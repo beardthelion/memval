@@ -7,14 +7,15 @@ re-executes `error` cells (R21).
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
 from .agent import run_cell
 from .gateway import load_gateway_config, serve_gateway
-from .judge import transcripts_dir
 from .memory_backends import make_cell_session
-from .report import CONDITIONS, load_judge_records, load_records, render_report
+from .records import cell_key, load_judge_records, load_records, transcripts_dir
+from .report import CONDITIONS, render_report
 from .score import control_outcome, score
 from .supervisor import (
     PreflightError,
@@ -29,19 +30,16 @@ from .supervisor import (
 from .tasks import default_tasks_dir, load_battery
 
 ALL_CONDITIONS = CONDITIONS
-COMPLETED = {"pass", "fail", "not_run"}
+# pass/fail are terminal. not_run is deliberately absent: a cell recorded
+# while its backend was down must be re-attempted on resume once the blocker
+# clears, not frozen forever.
+COMPLETED = {"pass", "fail"}
 
 
 def _completed_cells(path: Path) -> dict[tuple[str, str, str], str]:
-    done: dict[tuple[str, str, str], str] = {}
     if not path.exists():
-        return done
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        r = json.loads(line)
-        key = (r["task_id"], r["condition"], r["variant"])
-        done[key] = r["outcome"]
+        return {}
+    done = {cell_key(r): r["outcome"] for r in load_records(path)}
     # error cells re-execute on resume; keep only terminal outcomes.
     return {k: v for k, v in done.items() if v in COMPLETED}
 
@@ -84,6 +82,26 @@ async def run_battery(
     legs_dir.mkdir(exist_ok=True)
 
     completed = _completed_cells(results_path)
+    if completed:
+        # A resumed file carries the earlier invocation's model/seed; mixing
+        # generations under one report header would blend two models into
+        # one table.
+        prior = load_records(results_path)
+        prior_models = {r.get("model") for r in prior} - {None}
+        prior_seeds = {r.get("seed") for r in prior} - {None}
+        if prior_models - {model}:
+            print(
+                f"warning: resuming a results file recorded under "
+                f"model(s) {sorted(prior_models)}; current model is "
+                f"{model!r} and both will appear under one report header",
+                file=sys.stderr,
+            )
+        if prior_seeds - {seed}:
+            print(
+                f"warning: resuming a results file recorded under "
+                f"seed(s) {sorted(prior_seeds)}; current seed is {seed!r}",
+                file=sys.stderr,
+            )
     out = open(results_path, "a", encoding="utf-8")
 
     gateway = serve_gateway(cfg, port=find_free_port(8799))
@@ -174,12 +192,15 @@ async def run_battery(
                     evidence = res.evidence
                     record: dict = {
                         "task_id": task.id,
+                        "task_type": task.type,
                         "condition": cond,
                         "variant": variant,
                         "tool_calls": res.tool_calls,
                         "read_calls_blinded": evidence.read_calls_blinded,
                         "sentinel_landed": evidence.sentinel_landed,
                         "witness_ok": evidence.witness_ok,
+                        "guide_injected": evidence.guide_injected,
+                        "teardown_error": evidence.teardown_error,
                         "detail": res.detail,
                     }
                     if res.outcome == "error":
@@ -193,7 +214,7 @@ async def run_battery(
                         live_outcome = record["outcome"]
                     else:
                         record["control_outcome"] = control_outcome(
-                            task,
+                            task.type,
                             live_outcome or "missing",
                             record["outcome"],
                             evidence.sentinel_landed,

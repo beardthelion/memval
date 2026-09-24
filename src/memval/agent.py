@@ -15,12 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from .memory_backends import CellSession, ControlEvidence
+from .records import leg_filename
 from .tasks import Task
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant with access to the tools shown. "
     "Answer concisely. When a tool is available, prefer it over guessing."
 )
+SYSTEM_PROMPT_NO_TOOLS = "You are a helpful assistant. Answer concisely."
 
 MAX_TURNS_PER_PROMPT = 8
 
@@ -90,7 +92,11 @@ def _write_transcript(path: Path, messages: list[dict]) -> None:
     for m in messages:
         role = m.get("role")
         content = m.get("content") or ""
-        if role == "user":
+        if role == "system":
+            # The judge needs to see what the agent was actually told;
+            # injected backend text is scrubbed later by blind_transcript.
+            lines.append(f"System: {content}")
+        elif role == "user":
             lines.append(f"User: {content}")
         elif role == "assistant":
             if content:
@@ -127,10 +133,13 @@ async def run_cell(
         for leg_index, leg in enumerate(task.sessions):
             user_scope = task.users[leg_index] if leg_index < len(task.users) else None
             await session.start_leg(leg_index, user_scope)
+            base_prompt = (
+                SYSTEM_PROMPT if session.tool_specs else SYSTEM_PROMPT_NO_TOOLS
+            )
             messages: list[dict] = [
-                {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + session.injected_text}
+                {"role": "system", "content": base_prompt + "\n\n" + session.injected_text}
                 if session.injected_text
-                else {"role": "system", "content": SYSTEM_PROMPT}
+                else {"role": "system", "content": base_prompt}
             ]
             for turn in leg:
                 messages.append({"role": "user", "content": turn})
@@ -156,9 +165,8 @@ async def run_cell(
                         )
                 else:
                     raise UpstreamError(f"task {task.id} leg {leg_index}: turn budget exhausted")
-            transcript = (
-                transcripts_dir
-                / f"{task.id}-{condition}-{variant}-leg{leg_index}.txt"
+            transcript = transcripts_dir / leg_filename(
+                task.id, condition, variant, leg_index
             )
             _write_transcript(transcript, messages)
             await session.end_leg(transcript)
@@ -190,7 +198,12 @@ async def run_cell(
             evidence=session.evidence,
         )
     finally:
-        await session.close()
+        # A teardown failure must not abort the battery or discard a result
+        # already computed for this cell; it attaches as evidence instead.
+        try:
+            await session.close()
+        except Exception:
+            session.evidence.teardown_error = True
 
 
 async def _chat_async(*args) -> dict:

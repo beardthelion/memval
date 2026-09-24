@@ -16,16 +16,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .report import load_records
+from .gateway import is_loopback_host
+from .records import (
+    cell_key,
+    cell_leg_paths,
+    is_error_record,
+    is_judged_record,
+    load_records,
+    now_iso,
+    sidecar_path,
+    transcripts_dir,
+)
 from .tasks import Task, default_tasks_dir, load_battery
 
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
@@ -172,22 +184,6 @@ def blind_transcript(text: str) -> str:
     return _DENYLIST_RE.sub(_DENYLIST_REPLACEMENT, text)
 
 
-def _describe_expected(expected) -> str:
-    """Plain-language description of the correct answer for the judge state."""
-    if expected.mode == "exact":
-        return f'The final answer is correct only if it matches: "{expected.value}".'
-    if expected.mode == "contains_all":
-        kws = ", ".join(repr(k) for k in (expected.keywords or []))
-        return f"The final answer is correct only if it includes all of: {kws}."
-    if expected.mode == "contains_none":
-        terms = ", ".join(repr(t) for t in (expected.forbidden or []))
-        return (
-            f"Correct behavior never mentions any of: {terms}. "
-            "Mentioning one is a cross-scope leak and a failure."
-        )
-    return f"The expected answer uses scoring mode {expected.mode!r}."
-
-
 def judge_state(task, transcript: str | Sequence[str]) -> str:
     """Build the blinded judge state for one cell.
 
@@ -204,8 +200,12 @@ def judge_state(task, transcript: str | Sequence[str]) -> str:
     blinded = ("\n" + LEG_SEPARATOR + "\n").join(
         blind_transcript(leg) for leg in legs
     )
-    final_question = task.sessions[-1][-1] if task.sessions else ""
-    facts = "\n".join(f"- {fact}" for fact in task.planted_facts)
+    # Task-derived text gets the same scrub as the transcript: a planted
+    # fact or prompt naming a backend would de-blind the whole state.
+    final_question = (
+        blind_transcript(task.sessions[-1][-1]) if task.sessions else ""
+    )
+    facts = "\n".join(f"- {blind_transcript(fact)}" for fact in task.planted_facts)
     if not facts:
         facts = "(none planted; the store surface was empty for this task)"
     return "\n\n".join(
@@ -218,7 +218,7 @@ def judge_state(task, transcript: str | Sequence[str]) -> str:
             ),
             "TRANSCRIPT:\n" + blinded,
             "FINAL QUESTION THE AGENT HAD TO ANSWER:\n" + final_question,
-            "WHAT A CORRECT ANSWER LOOKS LIKE:\n" + _describe_expected(task.expected),
+            "WHAT A CORRECT ANSWER LOOKS LIKE:\n" + blind_transcript(task.expected.describe()),
             (
                 "FACTS PLANTED IN THE MEMORY STORE (the complete ground-truth "
                 "memory surface; a claimed memory beyond these facts, the "
@@ -246,6 +246,17 @@ class JevClient:
         if not self.api_key:
             raise RuntimeError(
                 "TYPESAFE_API_KEY is not set; the judge cannot run without it"
+            )
+        # The key rides a Bearer header to whatever URL --endpoint names, so
+        # the endpoint is held to the same rule as gateway upstreams: https,
+        # or http only for loopback (the fake Jev fixture).
+        parsed = urllib.parse.urlparse(self.endpoint)
+        if parsed.scheme != "https" and not (
+            parsed.scheme == "http" and is_loopback_host(parsed.hostname or "")
+        ):
+            raise RuntimeError(
+                f"Jev endpoint must be https (loopback http allowed): "
+                f"{self.endpoint!r}"
             )
 
     def evaluate(
@@ -302,13 +313,19 @@ class JevClient:
         raise last
 
 
-def _confidence(raw: dict) -> float:
+def _confidence(name: str, raw: dict) -> float:
     """Missing or malformed confidence reads as 0: unconfident by default,
-    never silently trusted."""
+    never silently trusted. A present-but-out-of-range value is malformed
+    input, so it raises like any other bad answer."""
     conf = raw.get("confidence")
-    if isinstance(conf, (int, float)) and not isinstance(conf, bool):
-        return float(conf)
-    return 0.0
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool):
+        return 0.0
+    conf = float(conf)
+    if not math.isfinite(conf) or not 0.0 <= conf <= 1.0:
+        raise JudgeError(
+            f"Jev answer for {name!r} carries out-of-range confidence {conf}"
+        )
+    return conf
 
 
 def _dist_expectation(dist) -> float | None:
@@ -342,8 +359,14 @@ def _parse_score(name: str, raw: dict, n_rungs: int) -> dict:
                 f"Jev answer for {name!r} has neither a score nor a usable "
                 "distribution"
             )
-    score = max(0.0, min(float(n_rungs - 1), float(score)))
-    conf = _confidence(raw)
+    score = float(score)
+    # Out-of-contract values are malformed input, not data to coerce: NaN or
+    # a 9/4-scale score must record judge_error, not silently pin to a rung.
+    if not math.isfinite(score) or not 0.0 <= score <= n_rungs - 1:
+        raise JudgeError(
+            f"Jev answer for {name!r} score {score} outside [0, {n_rungs - 1}]"
+        )
+    conf = _confidence(name, raw)
     dist = raw.get("distribution")
     return {
         "type": "score",
@@ -362,6 +385,10 @@ def _parse_noul(name: str, raw: dict) -> dict:
             break
     else:
         raise JudgeError(f"Jev answer for {name!r} carries no probability")
+    if not math.isfinite(p) or not 0.0 <= p <= 1.0:
+        raise JudgeError(
+            f"Jev answer for {name!r} probability {p} outside [0, 1]"
+        )
     return {
         "type": "noul",
         "probability": p,
@@ -369,7 +396,7 @@ def _parse_noul(name: str, raw: dict) -> dict:
     }
 
 
-def _parse_choice(name: str, raw: dict) -> dict:
+def _parse_choice(name: str, raw: dict, valid: set[str] | None) -> dict:
     label = None
     for key in ("choice", "label", "answer", "selection"):
         if isinstance(raw.get(key), str):
@@ -383,7 +410,12 @@ def _parse_choice(name: str, raw: dict) -> dict:
             label = None
     if label is None:
         raise JudgeError(f"Jev answer for {name!r} carries no choice")
-    conf = _confidence(raw)
+    # Off-vocabulary labels would land verbatim as new report buckets.
+    if valid is not None and label not in valid:
+        raise JudgeError(
+            f"Jev answer for {name!r} chose unknown label {label!r}"
+        )
+    conf = _confidence(name, raw)
     return {
         "type": "choice",
         "choice": label,
@@ -422,13 +454,13 @@ def parse_answers(response: dict, questions: dict | None = None) -> dict:
         elif qtype == "noul":
             out[name] = _parse_noul(name, raw)
         elif qtype == "choice":
-            out[name] = _parse_choice(name, raw)
+            criteria = spec.get("criteria")
+            valid = set(criteria) if isinstance(criteria, dict) else None
+            out[name] = _parse_choice(name, raw, valid)
         else:
             raise JudgeError(f"unknown question type {qtype!r} for {name!r}")
     return out
 
-
-_LEG_RE = re.compile(r"-leg(\d+)\.txt$")
 
 # Outcomes worth judging: cells that ran to an answer. error/not_run cells
 # have no meaningful transcript to score.
@@ -442,41 +474,10 @@ FLAG_INVALID_RATE = 0.15
 # list and counts as a positive prediction in calibration scoring.
 CONFAB_SUSPECT_P = 0.65
 
-
-def cell_key(rec: dict) -> tuple[str, str, str]:
-    """The (task, condition, variant) triple identifying one scored cell."""
-    return (rec["task_id"], rec["condition"], rec["variant"])
-
-
-def sidecar_path(results_path: Path) -> Path:
-    """The judge sidecar for a results file: ``foo.jsonl`` ->
-    ``foo.judge.jsonl``."""
-    return results_path.with_suffix(".judge.jsonl")
-
-
-def transcripts_dir(results_path: Path) -> Path:
-    """Per-cell transcripts persist beside the results file so the judge can
-    run after the run root is gone."""
-    return results_path.with_suffix(".transcripts")
-
-
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
-
-
-def _leg_no(path: Path) -> int:
-    m = _LEG_RE.search(path.name)
-    return int(m.group(1)) if m else -1
-
-
-def cell_leg_paths(transcripts_dir: Path, task_id: str, condition: str,
-                   variant: str) -> list[Path]:
-    """A cell's per-leg transcript paths in numeric leg order (leg10 sorts
-    after leg2, not before)."""
-    return sorted(
-        transcripts_dir.glob(f"{task_id}-{condition}-{variant}-leg*.txt"),
-        key=_leg_no,
-    )
+# judge_error causes that can never heal on re-judge; cells whose latest
+# sidecar record is one of these are skipped instead of re-appending an
+# identical error every run. API and parse failures stay retryable.
+TERMINAL_ERROR_PREFIXES = ("task not in battery", "no transcript")
 
 
 def _cell_transcripts(transcripts_dir: Path, task_id: str, condition: str,
@@ -508,12 +509,16 @@ def judge_results(
     battery = {t.id: t for t in load_battery(tasks_dir or default_tasks_dir())}
     version = bundle_version()
 
-    done: set[tuple[str, str, str]] = set()
+    # Latest sidecar record per cell decides resume state: an answers record
+    # is done, a terminal judge_error is done (it cannot heal), and a
+    # transient error retries. Adjudication records never mark a cell done.
+    latest: dict[tuple[str, str, str], dict] = {}
     mixed_versions: set[str] = set()
     if sidecar.exists():
         for rec in load_records(sidecar):
-            if "judge_error" not in rec and "answers" in rec:
-                done.add(cell_key(rec))
+            if rec.get("adjudicated"):
+                continue
+            latest[cell_key(rec)] = rec
             other = rec.get("bundle_version")
             if other not in (None, version) and other not in mixed_versions:
                 mixed_versions.add(other)
@@ -522,8 +527,22 @@ def judge_results(
                     f"({other} vs current {version})",
                     file=sys.stderr,
                 )
+    done = {
+        key
+        for key, rec in latest.items()
+        if is_judged_record(rec)
+        or (
+            is_error_record(rec)
+            and rec["judge_error"].startswith(TERMINAL_ERROR_PREFIXES)
+        )
+    }
 
-    records = load_records(results_path)
+    # Last result record per cell wins, matching the report's resume
+    # semantics: a re-executed cell must not be judged twice off its stale
+    # earlier row.
+    records = list(
+        {cell_key(r): r for r in load_records(results_path)}.values()
+    )
 
     def fail(key: tuple[str, str, str], msg: str) -> None:
         out.write(
@@ -534,7 +553,7 @@ def judge_results(
                     "variant": key[2],
                     "bundle_version": version,
                     "judge_error": msg,
-                    "judged_at": _now_iso(),
+                    "judged_at": now_iso(),
                 }
             )
             + "\n"
@@ -580,7 +599,7 @@ def judge_results(
                         "latency_ms": latency_ms,
                         "answers": answers,
                         "flags": flags,
-                        "judged_at": _now_iso(),
+                        "judged_at": now_iso(),
                     }
                 )
                 + "\n"

@@ -184,3 +184,21 @@ def test_load_battery_validation_names_file(tmp_path):
     bad.write_text(json.dumps(_base_task(id="BAD ID")), encoding="utf-8")
     with pytest.raises(TaskValidationError, match="task-bad.json"):
         load_battery(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "bad_user", ["Alice", "../etc", "a/b", "a b", "a..b", "-x", "a.b"]
+)
+def test_users_must_be_safe_slugs(bad_user):
+    task = _base_task(users=[bad_user, "bob"], type="isolation",
+                      expected={"mode": "contains_none", "forbidden": ["x"]})
+    with pytest.raises(TaskValidationError, match="users"):
+        validate_task(task)
+
+
+def test_users_must_cover_every_leg():
+    # A leg without a named user silently shares the base scope.
+    task = _base_task(users=["alice"], type="isolation",
+                      expected={"mode": "contains_none", "forbidden": ["x"]})
+    with pytest.raises(TaskValidationError, match="users"):
+        validate_task(task)

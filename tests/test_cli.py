@@ -215,3 +215,20 @@ def test_bad_config_exits_nonzero(tmp_path):
         ]
     )
     assert rc == 2
+
+
+def test_report_missing_file_exits_2(tmp_path):
+    assert main(["report", str(tmp_path / "nope.jsonl")]) == 2
+
+
+def test_judge_missing_results_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    rc = main(
+        [
+            "judge",
+            str(tmp_path / "nope.jsonl"),
+            "--endpoint",
+            "http://127.0.0.1:9/v1/systemone",
+        ]
+    )
+    assert rc == 2

@@ -137,9 +137,11 @@ tool-call budget. Only the memory wiring differs:
 - **signet**: a per-task `signet mcp` process under a fresh custody created
   by `signet init`. The agent-facing surface is read-only
   (recall/search/list); durable writes come from `signet learn`, which the
-  harness runs on each leg's transcript at the boundary. That asymmetry,
-  agent-discretionary saves versus automatic capture, is part of what the
-  comparison measures and is disclosed in the report.
+  harness runs on each leg's transcript at the boundary. Calls to tools
+  outside the advertised surface are rejected as tool errors, so the
+  read-only promise is enforced at dispatch, not just in the prompt. That
+  asymmetry, agent-discretionary saves versus automatic capture, is part of
+  what the comparison measures and is disclosed in the report.
 
 Isolation tasks respawn the MCP process per fictional user because both
 backends bind their scope at process start: memlawb via `MEMLAWB_NAMESPACE`,
@@ -152,7 +154,8 @@ below is analysis, not the outcome.
 
 - `exact`: normalized final answer equals `expected.value`.
 - `contains_all`: every `expected.keywords` entry appears in the normalized
-  final answer.
+  final answer on token boundaries (a keyword cannot match inside a larger
+  token).
 - `contains_none`: no `expected.forbidden` token appears in *any* assistant
   message of the closing leg, so a mid-session leak cannot pass on a clean
   final line.
@@ -223,8 +226,9 @@ A control is only meaningful if both halves are proven: reads served nothing
 (observed blinded read calls) and a write provably landed (the sentinel).
 Outcomes:
 
-- `collapsed`: live passed, control dropped, sentinel landed. This is the
-  evidence that the memory delta is causal.
+- `collapsed`: live passed, control dropped, at least one read was provably
+  blinded, and the sentinel landed. This is the evidence that the memory
+  delta is causal.
 - `no_drop`: the control scored the same as a passing live run; the task is
   flagged `INVALID` in the report because it was not measuring memory.
 - `inconclusive`: the harness could not prove both halves.

@@ -4,11 +4,32 @@ Reads a results JSONL (one record per task x condition x variant cell) and
 renders the three-way comparison, per-task control outcomes, and the
 disclosure block. A condition that could not start renders "not run", never
 a 0% row (R22).
+
+Control outcomes are recomputed here from the evidence fields stored on
+each record rather than trusting the value frozen at emit time, so a
+resumed run whose live cell re-executed cannot leave a stale verdict in
+the table.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from .judge import CONFAB_SUSPECT_P, FLAG_INVALID_RATE, QUESTIONS
+from .records import (
+    cell_key,
+    is_error_record,
+    is_judged_record,
+    load_judge_records,
+    load_records,
+    partition_flagged,
+)
+from .score import control_outcome
+
+__all__ = [
+    "CONDITIONS",
+    "CONTROL_LABELS",
+    "load_judge_records",
+    "load_records",
+    "render_report",
+]
 
 CONDITIONS = ["none", "memlawb", "signet"]
 
@@ -20,26 +41,6 @@ CONTROL_LABELS = {
 }
 
 
-def load_records(path: Path) -> list[dict]:
-    records = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-    return records
-
-
-def load_judge_records(results_path: Path) -> list[dict] | None:
-    """The sidecar for a results file, or None when no judge pass ran."""
-    from .judge import sidecar_path
-
-    sidecar = sidecar_path(Path(results_path))
-    if not sidecar.exists():
-        return None
-    return load_records(sidecar)
-
-
 def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
@@ -48,47 +49,75 @@ def _fmt(v: float | None) -> str:
     return f"{v:.2f}" if v is not None else "-"
 
 
-def _judge_section(judge_records: list[dict]) -> list[str]:
+def _judge_value(rec: dict, adjudications: dict, question: str, field: str):
+    """A cell's value for one question: the human label when adjudicated,
+    else the Jev answer."""
+    adj = adjudications.get(cell_key(rec))
+    if adj is not None:
+        human = adj.get(f"human_{field if question == 'task_success' else question}")
+        if human is not None:
+            return 1.0 if human is True else 0.0 if human is False else float(human)
+    return rec["answers"][question][field]
+
+
+def _judge_section(judge_records: list[dict], results: list[dict]) -> list[str]:
     """Render the judge analysis block from sidecar records (R8).
 
     Flagged cells are excluded from the means; a run whose flag rate exceeds
-    15% is headed invalid per the uncertainty policy (R6). Judge output is
-    advisory -- it never feeds back into the mechanical table above.
+    15% of judgeable cells is headed invalid per the uncertainty policy
+    (R6). Judge output is advisory -- it never feeds back into the
+    mechanical table above.
     """
-    from .judge import CONFAB_SUSPECT_P, FLAG_INVALID_RATE, cell_key
-
+    # Only records matching the current bundle's question set aggregate;
+    # stale-generation records (a rubric/bundle change mid-sidecar) are
+    # counted and skipped so they can never KeyError the section.
     judged = [
-        r for r in judge_records if "judge_error" not in r and "answers" in r
+        r
+        for r in judge_records
+        if is_judged_record(r) and all(q in r["answers"] for q in QUESTIONS)
     ]
-    errors = len(judge_records) - len(judged)
-    adjudicated = {cell_key(r) for r in judge_records if r.get("adjudicated")}
-    flagged, clean = [], []
-    for r in judged:
-        if r.get("flags") and cell_key(r) not in adjudicated:
-            flagged.append(r)
-        else:
-            clean.append(r)
-    flag_rate = len(flagged) / len(judged) if judged else 0.0
+    stale = sum(
+        1 for r in judge_records if is_judged_record(r)
+    ) - len(judged)
+    judged_keys = {cell_key(r) for r in judged}
+    errors = len(
+        {
+            cell_key(r)
+            for r in judge_records
+            if is_error_record(r) and cell_key(r) not in judged_keys
+        }
+    )
+    flagged, clean = partition_flagged(judged)
+    adjudications = {
+        cell_key(r): r for r in judge_records if r.get("adjudicated")
+    }
+
+    judgeable = {
+        cell_key(r) for r in results if r.get("outcome") in ("pass", "fail")
+    }
+    denominator = len(judgeable) if judgeable else len(judged)
+    flag_rate = len(flagged) / denominator if denominator else 0.0
     invalid = flag_rate > FLAG_INVALID_RATE
 
     heading = "## Judge analysis (Jev)"
     if invalid:
-        heading += f" -- INVALID: {flag_rate:.0%} of cells flagged (>15%)"
+        heading += f" -- INVALID: {flag_rate:.0%} of judgeable cells flagged (>15%)"
     lines = ["", heading, ""]
+    if len(judged) < denominator:
+        lines += [
+            f"*coverage: {len(judged)} of {denominator} judgeable cells "
+            "scored; the rest hit judge errors*",
+            "",
+        ]
 
     conditions = sorted(
-        {r["condition"] for r in clean} - {"none"}, key=CONDITIONS.index
+        {r["condition"] for r in clean} - {"none"},
+        key=lambda c: CONDITIONS.index(c) if c in CONDITIONS else len(CONDITIONS),
     )
     if conditions:
-        for title, getter in (
-            (
-                "Memory-use probability (live vs control)",
-                lambda r: r["answers"]["memory_used"]["probability"],
-            ),
-            (
-                "Task-success score, 0-4 (live vs control)",
-                lambda r: r["answers"]["task_success"]["score"],
-            ),
+        for title, question, field in (
+            ("Memory-use probability (live vs control)", "memory_used", "probability"),
+            ("Task-success score, 0-4 (live vs control)", "task_success", "score"),
         ):
             lines += [
                 f"### {title}",
@@ -99,14 +128,14 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
             for c in conditions:
                 live = _mean(
                     [
-                        getter(r)
+                        _judge_value(r, adjudications, question, field)
                         for r in clean
                         if r["condition"] == c and r["variant"] == "live"
                     ]
                 )
                 ctrl = _mean(
                     [
-                        getter(r)
+                        _judge_value(r, adjudications, question, field)
                         for r in clean
                         if r["condition"] == c and r["variant"] == "control"
                     ]
@@ -127,12 +156,13 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
     suspects = [
         r
         for r in clean
-        if r["answers"]["confabulated"]["probability"] > CONFAB_SUSPECT_P
+        if _judge_value(r, adjudications, "confabulated", "probability")
+        > CONFAB_SUSPECT_P
     ]
     if suspects:
         lines += ["### Confabulation suspects", ""]
         for r in suspects:
-            p = r["answers"]["confabulated"]["probability"]
+            p = _judge_value(r, adjudications, "confabulated", "probability")
             lines.append(
                 f"- `{r['task_id']}` ({r['condition']}, {r['variant']}): {p:.2f}"
             )
@@ -144,9 +174,14 @@ def _judge_section(judge_records: list[dict]) -> list[str]:
     out_tok = sum(
         (r.get("usage") or {}).get("output_tokens", 0) for r in judge_records
     )
-    lines += [
+    footer = (
         f"- {len(judged)} cells judged, {len(flagged)} flagged "
-        f"({flag_rate:.0%}), {errors} judge errors",
+        f"({flag_rate:.0%}), {errors} unresolved judge errors"
+    )
+    if stale:
+        footer += f", {stale} records skipped (stale bundle version)"
+    lines += [
+        footer,
         f"- judge spend: {in_tok} input / {out_tok} output tokens",
     ]
     return lines
@@ -157,8 +192,31 @@ def _cell_map(records: list[dict]) -> dict[tuple[str, str, str], dict]:
     re-executed error cell replaces its earlier error record."""
     cells: dict[tuple[str, str, str], dict] = {}
     for r in records:
-        cells[(r["task_id"], r["condition"], r["variant"])] = r
+        cells[cell_key(r)] = r
     return cells
+
+
+def _control_verdict(
+    r: dict, live: dict | None
+) -> str:
+    """Recompute the control classification from stored evidence so a
+    resumed run cannot leave a stale verdict (and a not_run cell renders its
+    own outcome). Falls back to the emit-time value for old records that
+    lack task_type."""
+    outcome = r.get("outcome", "-")
+    # A control cell that never ran reports its own outcome, not a verdict
+    # about evidence it never produced.
+    if "task_type" not in r or outcome in ("not_run", "error"):
+        return r.get("control_outcome") or outcome
+    live_outcome = (live or {}).get("outcome", "missing")
+    return control_outcome(
+        r["task_type"],
+        live_outcome,
+        r.get("outcome", ""),
+        bool(r.get("sentinel_landed")),
+        int(r.get("read_calls_blinded") or 0),
+        r.get("witness_ok"),
+    )
 
 
 def render_report(
@@ -225,7 +283,9 @@ def render_report(
             r = cells.get((tid, c, "control"))
             if r is None:
                 continue
-            outcome = CONTROL_LABELS.get(r.get("control_outcome", ""), r.get("control_outcome", "?"))
+            live = cells.get((tid, c, "live"))
+            verdict = _control_verdict(r, live)
+            outcome = CONTROL_LABELS.get(verdict, verdict if verdict else "-")
             witness = r.get("witness_ok")
             witness_s = {True: "ok", False: "FAILED", None: "-"}.get(witness, "-")
             lines.append(f"| `{tid}` | {c} | {outcome} | {witness_s} |")
@@ -247,12 +307,12 @@ def render_report(
         "",
         "## Disclosures",
         "",
-        "- Tool surfaces are native per condition: memlawb advertises save/recall/search/list/delete; signet advertises read tools only, with capture done harness-side by `signet learn` at each session boundary. Backend guide text is filtered to the advertised surface.",
+        "- Tool surfaces are native per condition: memlawb advertises save/recall/search/list/delete; signet advertises read tools only, with capture done harness-side by `signet learn` at each session boundary. Backend guide text and server instructions are filtered to the advertised surface; calls to unadvertised tools return a tool error.",
         "- Write paths differ by design: memlawb saves are agent-discretionary; signet captures are automatic at the boundary. This asymmetry is the design difference being measured.",
         "- Isolation tasks measure default-surface leakage only: the second fictional user's session is never told the first user's scope name, so backend options that address a sibling scope by name are untested.",
-        "- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message.",
+        "- `contains_none` is scored over every assistant message in the closing leg; `exact`/`contains_all` over the final message. `contains_all` matches keywords on token boundaries.",
         "",
     ]
     if judge_records:
-        lines += _judge_section(judge_records)
+        lines += _judge_section(judge_records, records)
     return "\n".join(lines)

@@ -9,8 +9,8 @@ from pathlib import Path
 import anyio
 
 from .isolation import check_isolation
-from .judge import transcripts_dir
-from .report import load_judge_records, load_records, render_report
+from .records import load_judge_records, load_records, transcripts_dir
+from .report import render_report
 from .run import ALL_CONDITIONS, run_battery
 from .supervisor import PreflightError
 
@@ -74,12 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "report":
-        print(
-            render_report(
-                load_records(args.results),
-                judge_records=load_judge_records(args.results),
+        try:
+            print(
+                render_report(
+                    load_records(args.results),
+                    judge_records=load_judge_records(args.results),
+                )
             )
-        )
+        except FileNotFoundError as e:
+            print(str(e), file=sys.stderr)
+            return 2
         return 0
     if args.cmd == "judge":
         from .judge import JEV_ENDPOINT, JevClient, judge_results
@@ -89,7 +93,13 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as e:
             print(str(e), file=sys.stderr)
             return 2
-        sidecar = judge_results(args.results, tasks_dir=args.tasks_dir, client=client)
+        try:
+            sidecar = judge_results(
+                args.results, tasks_dir=args.tasks_dir, client=client
+            )
+        except FileNotFoundError as e:
+            print(str(e), file=sys.stderr)
+            return 2
         print(f"judge sidecar: {sidecar}")
         return 0
     if args.cmd == "calibrate":

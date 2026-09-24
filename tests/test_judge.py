@@ -552,3 +552,73 @@ def test_judge_cli_fails_closed_without_key(tmp_path, monkeypatch):
     results = tmp_path / "run.jsonl"
     results.write_text("")
     assert main(["judge", str(results)]) == 2
+
+
+def test_endpoint_rejects_non_loopback_http():
+    JevClient(api_key="k", endpoint="https://api.typesafe.ai/v1/systemone")
+    JevClient(api_key="k", endpoint="http://127.0.0.1:9/x")
+    JevClient(api_key="k", endpoint="http://localhost:9/x")
+    with pytest.raises(RuntimeError, match="https"):
+        JevClient(api_key="k", endpoint="http://evil.example.com/v1/systemone")
+    with pytest.raises(RuntimeError, match="https"):
+        JevClient(api_key="k", endpoint="ftp://127.0.0.1/x")
+
+
+def test_terminal_errors_not_reappended(jev_server, tmp_path):
+    _seed_cell(tmp_path, "nope-99", "none", "live")
+    client = _client(jev_server)
+    sidecar = judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+    judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+    recs = [
+        json.loads(l) for l in sidecar.read_text().splitlines() if l.strip()
+    ]
+    assert len(recs) == 1
+    assert "judge_error" in recs[0]
+
+
+def test_transient_errors_retry_on_next_run(tmp_path):
+    bad = fake_jev.serve(0, responder=lambda b: (500, {"error": "boom"}))
+    threading.Thread(target=bad.serve_forever, daemon=True).start()
+    try:
+        _seed_cell(tmp_path, "recall-01", "none", "live")
+        client = _client(bad)
+        sidecar = judge_results(
+            tmp_path / "run.jsonl", client=client, progress=None
+        )
+        judge_results(tmp_path / "run.jsonl", client=client, progress=None)
+        recs = [
+            json.loads(l)
+            for l in sidecar.read_text().splitlines()
+            if l.strip()
+        ]
+        # The API error is retryable, so the second run re-judged and
+        # appended a fresh error record.
+        assert len(recs) == 2
+        assert all("judge_error" in r for r in recs)
+    finally:
+        bad.shutdown()
+
+
+def test_out_of_range_answer_records_judge_error(tmp_path):
+    answers = dict(fake_jev.DEFAULT_ANSWERS)
+    answers["task_success"] = {"score": 9.0, "confidence": 0.9}
+    srv = fake_jev.serve(
+        0,
+        responder=lambda b: (
+            200, {"model": "jev-latest", "answers": answers, "usage": {}}
+        ),
+    )
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        _seed_cell(tmp_path, "recall-01", "none", "live")
+        sidecar = judge_results(
+            tmp_path / "run.jsonl", client=_client(srv), progress=None
+        )
+        (rec,) = [
+            json.loads(l)
+            for l in sidecar.read_text().splitlines()
+            if l.strip()
+        ]
+        assert "outside" in rec["judge_error"]
+    finally:
+        srv.shutdown()

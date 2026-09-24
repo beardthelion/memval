@@ -168,3 +168,55 @@ def test_judge_section_skips_absent_conditions(tmp_path):
     out = render_report([], judge_records=judge)
     assert "| signet |" in out
     assert "| memlawb |" not in out
+
+
+def test_not_run_control_renders_its_outcome():
+    records = [
+        _rec("t1", "memlawb", "live", "not_run"),
+        _rec("t1", "memlawb", "control", "not_run", control_outcome=None),
+    ]
+    out = render_report(records)
+    assert "| `t1` | memlawb | not_run |" in out
+
+
+def test_control_verdict_recomputed_from_evidence():
+    # The stored verdict was frozen when the live sibling had errored; the
+    # resumed live pass must flip it to collapsed at report time.
+    records = [
+        _rec("t1", "memlawb", "live", "pass", task_type="recall"),
+        _rec(
+            "t1", "memlawb", "control", "fail",
+            task_type="recall", control_outcome="inconclusive",
+        ),
+    ]
+    out = render_report(records)
+    assert "| `t1` | memlawb | collapsed |" in out
+
+
+def test_judge_section_tolerates_stale_bundle_records():
+    judge = [
+        _judge_rec("t1", "memlawb", "live"),
+        {
+            "task_id": "t2",
+            "condition": "memlawb",
+            "variant": "live",
+            "bundle_version": "old",
+            "answers": {"legacy_question": {"score": 1.0}},
+        },
+    ]
+    out = render_report([], judge_records=judge)
+    assert "stale bundle" in out
+
+
+def test_judge_errors_deduped_and_adjudications_not_errors():
+    judge = [
+        _judge_rec("t1", "memlawb", "live"),
+        {"task_id": "t2", "condition": "memlawb", "variant": "live",
+         "judge_error": "boom"},
+        {"task_id": "t2", "condition": "memlawb", "variant": "live",
+         "judge_error": "boom"},
+        {"task_id": "t1", "condition": "memlawb", "variant": "live",
+         "adjudicated": True, "human_score": 3.0},
+    ]
+    out = render_report([], judge_records=judge)
+    assert "1 unresolved judge errors" in out

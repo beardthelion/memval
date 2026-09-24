@@ -19,6 +19,10 @@ from pathlib import Path
 from typing import NoReturn
 
 TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# users land in namespace segments and on-disk scope dirs, so they get the
+# same slug charset as task ids plus underscore (CWE-22: no separators,
+# dots, or backslashes can reach a path).
+USER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 TASK_TYPES = {"recall", "follow-through", "isolation"}
 EXPECTED_MODES = {"exact", "contains_all", "contains_none"}
@@ -49,6 +53,22 @@ class Expected:
     keywords: list[str] | None = None
     forbidden: list[str] | None = None
 
+    def describe(self) -> str:
+        """Plain-language description of the correct answer, for the judge
+        state and any other consumer that should not switch on ``mode``."""
+        if self.mode == "exact":
+            return f'The final answer is correct only if it matches: "{self.value}".'
+        if self.mode == "contains_all":
+            kws = ", ".join(repr(k) for k in (self.keywords or []))
+            return f"The final answer is correct only if it includes all of: {kws}."
+        if self.mode == "contains_none":
+            terms = ", ".join(repr(t) for t in (self.forbidden or []))
+            return (
+                f"Correct behavior never mentions any of: {terms}. "
+                "Mentioning one is a cross-scope leak and a failure."
+            )
+        return f"The expected answer uses scoring mode {self.mode!r}."
+
 
 @dataclass
 class Task:
@@ -59,12 +79,6 @@ class Task:
     expected: Expected
     control: bool
     users: list[str] = field(default_factory=list)
-
-    @property
-    def memory_dependent(self) -> bool:
-        """A task that plants facts can only be answered across the boundary
-        via memory, so it must ship a control variant (R4)."""
-        return bool(self.planted_facts)
 
 
 def validate_task(raw: dict, source: str = "<dict>") -> Task:
@@ -128,6 +142,15 @@ def validate_task(raw: dict, source: str = "<dict>") -> Task:
     users = raw.get("users", [])
     if not isinstance(users, list) or not all(isinstance(u, str) for u in users):
         fail("users must be a list of strings")
+    if any(not USER_RE.match(u) for u in users):
+        fail(
+            "users entries must match ^[a-z0-9][a-z0-9_-]*$ (they land in "
+            "namespaces and scope paths)"
+        )
+    if users and len(users) < len(sessions):
+        # A leg without a named user silently shares the base scope; either
+        # name a user per leg or name none at all.
+        fail("users must cover every session leg, or be omitted")
     if task_type == "isolation" and len(users) < 2:
         fail("isolation task requires at least 2 users")
 

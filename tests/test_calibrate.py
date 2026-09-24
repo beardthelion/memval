@@ -85,7 +85,7 @@ def test_worksheet_is_blinded_and_stratified(tmp_path):
     # Stratification: the join map covers multiple conditions.
     join_map = json.loads(
         (tmp_path / "run.calibration.map.json").read_text()
-    )
+    )["rows"]
     conds = {v["condition"] for v in join_map.values()}
     assert conds == {"none", "memlawb", "signet"}
 
@@ -101,11 +101,13 @@ def test_worksheet_includes_flagged_cells_on_top(tmp_path):
     rows = [json.loads(l) for l in ws.read_text().splitlines()]
     join_map = json.loads(
         (tmp_path / "run.calibration.map.json").read_text()
-    )
-    flagged_rows = [
-        join_map[r["row_id"]]["task_id"] for r in rows if r["flagged"]
-    ]
-    assert sorted(flagged_rows) == ["task-00", "task-01"]
+    )["rows"]
+    # The judge's flag state never reaches the labeler; inclusion is
+    # observable only through the harness-side join map.
+    for row in rows:
+        assert "flagged" not in row
+    emitted = sorted(v["task_id"] for v in join_map.values())
+    assert "task-00" in emitted and "task-01" in emitted
     assert len(rows) == 6  # 2 flagged + 4 sampled
 
 
@@ -119,8 +121,7 @@ def test_score_labels_agreement_bias_and_reliability(tmp_path):
     ws = emit_worksheet(results, sample=10)
     join_map = json.loads(
         (tmp_path / "run.calibration.map.json").read_text()
-    )
-    ordered = sorted(join_map)
+    )["rows"]
     labels_rows = []
     for i, line in enumerate(ws.read_text().splitlines()):
         row = json.loads(line)
@@ -182,6 +183,19 @@ def test_score_labels_reports_invalid_and_missing(tmp_path):
     assert metrics["missing"] == 2
 
 
+def test_score_labels_rejects_stale_generation(tmp_path):
+    # Labels written against worksheet generation N must not adjudicate the
+    # cells of a re-emitted worksheet whose row ids remapped.
+    records = [_judge_rec(f"task-{i}", "memlawb", "live") for i in range(4)]
+    results = _seed(tmp_path, records)
+    ws = emit_worksheet(results, sample=4)
+    labels = _fill_labels(tmp_path, ws, score=3.0)
+    emit_worksheet(results, sample=2)  # re-emit mints a new generation
+    metrics = score_labels(results, labels)
+    assert metrics["labeled"] == 0
+    assert metrics["invalid"] == 4
+
+
 def test_score_labels_confabulation_precision_recall(tmp_path):
     records = [
         _judge_rec("tp", "memlawb", "live", confab_p=0.9),
@@ -193,7 +207,7 @@ def test_score_labels_confabulation_precision_recall(tmp_path):
     ws = emit_worksheet(results, sample=4)
     join_map = json.loads(
         (tmp_path / "run.calibration.map.json").read_text()
-    )
+    )["rows"]
     confab_truth = {"tp": True, "fp": False, "fn": True, "tn": False}
     rows = []
     for line in ws.read_text().splitlines():

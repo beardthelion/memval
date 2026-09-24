@@ -179,3 +179,47 @@ def test_upstream_failure_is_error_not_fail(upstream_url, tmp_path):
     res = _run(TASK, session, upstream_url, tmp_path)
     assert res.outcome == "error"
     assert "backend died" in res.detail
+
+
+class ExplodingCloseSession(FakeSession):
+    async def close(self):
+        raise RuntimeError("teardown boom")
+
+
+def test_teardown_failure_does_not_discard_result(upstream_url, tmp_path):
+    session = ExplodingCloseSession(TASK, False, tmp_path, FakeStore())
+    res = _run(TASK, session, upstream_url, tmp_path)
+    assert res.outcome == "run"
+    assert res.evidence.teardown_error is True
+
+
+class NoneSession(CellSession):
+    async def start_leg(self, leg_index, user_scope):
+        self.tool_specs = []
+        self.injected_text = ""
+
+    async def call_tool(self, name, arguments):
+        return f"[tool error] unknown tool: {name}"
+
+
+def test_none_condition_prompt_claims_no_tools(tmp_path, monkeypatch):
+    import memval.agent as agent_mod
+
+    sent = []
+
+    async def fake_chat(gw, model, messages, tools, *a, **kw):
+        sent.append(messages[0]["content"])
+        return {"role": "assistant", "content": "ok"}
+
+    monkeypatch.setattr(agent_mod, "_chat_async", fake_chat)
+    session = NoneSession(task=TASK, control=False, log_dir=tmp_path)
+
+    async def go():
+        return await run_cell(
+            TASK, session, "http://unused", "fake",
+            transcripts_dir=tmp_path, condition="none", variant="live",
+        )
+
+    res = anyio.run(go)
+    assert res.outcome == "run"
+    assert sent and "tools" not in sent[0]

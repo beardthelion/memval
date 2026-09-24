@@ -25,7 +25,8 @@ class GatewayConfigError(ValueError):
     pass
 
 
-def _is_loopback_host(host: str) -> bool:
+def is_loopback_host(host: str) -> bool:
+    """The http exception allowed for fixtures: any loopback bind."""
     return host in {"127.0.0.1", "localhost", "::1"} or host.startswith("127.")
 
 
@@ -41,7 +42,7 @@ def load_gateway_config(path: str) -> dict:
             raise GatewayConfigError(f"model {name!r}: missing 'base'")
         parsed = urllib.parse.urlparse(base)
         if parsed.scheme != "https" and not (
-            parsed.scheme == "http" and _is_loopback_host(parsed.hostname or "")
+            parsed.scheme == "http" and is_loopback_host(parsed.hostname or "")
         ):
             raise GatewayConfigError(
                 f"model {name!r}: upstream base must be https (loopback http allowed): {base!r}"
@@ -140,7 +141,7 @@ def make_handler(config: dict):
 
 
 def serve_gateway(config: dict, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
-    if not _is_loopback_host(host):
+    if not is_loopback_host(host):
         raise GatewayConfigError(f"gateway binds loopback only, got {host!r}")
     server = ThreadingHTTPServer((host, port), make_handler(config))
     threading.Thread(target=server.serve_forever, daemon=True).start()

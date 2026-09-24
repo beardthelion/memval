@@ -20,6 +20,7 @@ from typing import Any
 
 from .mcp_client import McpConnection, ToolInfo
 from .supervisor import PreflightError, base_env
+from .tasks import Task
 
 MEMLAWB_TOOLS = [
     "memory_save",
@@ -53,13 +54,17 @@ def _openai_tool_spec(tool: ToolInfo) -> dict[str, Any]:
     }
 
 
-def _filter_guide(text: str, advertised: set[str]) -> str:
+def _filter_guide(
+    text: str, advertised: set[str], server_tools: set[str]
+) -> str:
     """Drop lines that reference tools this condition does not advertise.
 
     A guide that tells the agent to call a tool it does not have is a prompt
     defect, not a fair test; the report discloses that filtering happened.
+    A line mentioning even one unadvertised tool is dropped whole rather
+    than redacted, since a half-instruction is worse than none.
     """
-    known = MEMLAWB_TOOLS + [
+    known = set(server_tools) | set(MEMLAWB_TOOLS) | {
         "signet_save",
         "signet_recall",
         "signet_search",
@@ -69,11 +74,11 @@ def _filter_guide(text: str, advertised: set[str]) -> str:
         "signet_config_set",
         "signet_grant_list",
         "signet_grant_record",
-    ]
+    }
     out = []
     for line in text.splitlines():
         mentioned = [t for t in known if t in line]
-        if mentioned and not any(t in advertised for t in mentioned):
+        if mentioned and any(t not in advertised for t in mentioned):
             continue
         out.append(line)
     return "\n".join(out)
@@ -84,13 +89,15 @@ class ControlEvidence:
     read_calls_blinded: int = 0
     sentinel_landed: bool = False
     witness_ok: bool | None = None  # isolation tasks only
+    guide_injected: bool = False
+    teardown_error: bool = False
 
 
 @dataclass
 class CellSession:
     """One task x condition x variant execution context."""
 
-    task: Any
+    task: Task
     control: bool
     log_dir: Path
     evidence: ControlEvidence = field(default_factory=ControlEvidence)
@@ -125,7 +132,9 @@ class NoneCellSession(CellSession):
         self.injected_text = ""
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        raise AssertionError("no-memory condition exposes no tools")
+        # A hallucinated call must not error the cell; it gets the same
+        # tool-error surface a real backend would return.
+        return f"[tool error] unknown tool: {name}"
 
 
 class _McpCellSession(CellSession):
@@ -133,6 +142,7 @@ class _McpCellSession(CellSession):
 
     conn: McpConnection | None = None
     read_tools: set[str] = set()
+    _advertised_names: set[str] = set()
     _leg_index: int = -1
     _user_scope: str | None = None
 
@@ -155,8 +165,10 @@ class _McpCellSession(CellSession):
         self._leg_index = leg_index
         self._user_scope = user_scope
         advertised = self._advertised_tools()
+        self._advertised_names = {t.name for t in advertised}
         self.tool_specs = [_openai_tool_spec(t) for t in advertised]
         self.injected_text = await self._injection(self.conn, advertised)
+        self.evidence.guide_injected = bool(self.injected_text.strip())
 
     def _advertised_tools(self) -> list[ToolInfo]:
         assert self.conn is not None
@@ -164,12 +176,15 @@ class _McpCellSession(CellSession):
 
     async def _injection(self, conn: McpConnection, advertised: list[ToolInfo]) -> str:
         names = {t.name for t in advertised}
+        server_names = {t.name for t in conn.tools}
         parts = []
         if conn.instructions:
-            parts.append(conn.instructions)
+            # Server instructions can name tools this condition does not
+            # advertise (signet's write surface); filter them like the guide.
+            parts.append(_filter_guide(conn.instructions, names, server_names))
         guide = await self._guide_text(conn, self._guide_name())
         if guide:
-            parts.append(_filter_guide(guide, names))
+            parts.append(_filter_guide(guide, names, server_names))
         parts.append(
             "Memory tools available in this session: " + ", ".join(sorted(names))
         )
@@ -180,6 +195,12 @@ class _McpCellSession(CellSession):
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         assert self.conn is not None
+        # Advertise-filter parity: a name the model was never shown is a
+        # tool error, not a dispatch. Without this, signet's read-only
+        # promise is advisory only and a model that hallucinates
+        # signet_save would write for real.
+        if name not in self._advertised_names:
+            return f"[tool error] unknown tool: {name}"
         if self.control and name in self.read_tools:
             self.evidence.read_calls_blinded += 1
             return EMPTY_RESULT_TEXT
@@ -207,7 +228,7 @@ class MemlawbCellSession(_McpCellSession):
 
     def __init__(
         self,
-        task: Any,
+        task: Task,
         control: bool,
         log_dir: Path,
         checkout: Path,
@@ -278,7 +299,7 @@ class SignetCellSession(_McpCellSession):
 
     def __init__(
         self,
-        task: Any,
+        task: Task,
         control: bool,
         log_dir: Path,
         checkout: Path,
@@ -387,7 +408,7 @@ class SignetCellSession(_McpCellSession):
 
 def make_cell_session(
     condition: str,
-    task: Any,
+    task: Task,
     control: bool,
     log_dir: Path,
     *,

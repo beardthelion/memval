@@ -1,5 +1,7 @@
 # memval
 
+**For:** hiring managers and agent researchers who want evidence, not vibes, about whether durable memory helps AI agents.
+
 A reproducible evaluation harness that measures whether durable encrypted
 memory actually helps an agent. One shared agent loop answers a fixed 25-task
 battery under three conditions: no memory, memlawb (a crypto-blind encrypted
@@ -8,7 +10,7 @@ memory-dependent task is also run with retrieval disabled, so the report can
 prove the memory delta is causal rather than asserted.
 
 The point is evidence, not vibes: a hiring manager can open the committed
-sample report and see the three-way comparison plus the control check without
+[sample report](results/sample-report.md) and see the three-way comparison plus the control check without
 running anything.
 
 ## Requirements
@@ -174,7 +176,9 @@ Normalization is case-folding plus whitespace collapse. Cell outcomes are
 
 `memval judge` adds a supplementary analysis pass on top of the mechanical
 outcome. It sends each scored cell's blinded transcripts to the Jev System
-One endpoint in one batched call and records four typed answers per cell:
+One endpoint (Jev is a decision-only AI model that answers narrow judgment
+questions with calibrated confidence) in one batched call and records four
+typed answers per cell:
 
 - `task_success`: a 0-4 rubric score with confidence,
 - `memory_used`: a probability the agent actually used stored memory,
